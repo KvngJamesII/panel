@@ -1,0 +1,1013 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cloud Bot Manager</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/loader.min.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace']
+          },
+          colors: {
+            editor: {
+              bg: '#1e1e1e',
+              sidebar: '#252526',
+              active: '#37373d',
+              border: '#3c3c3c',
+              text: '#cccccc',
+              accent: '#0078d4',
+              success: '#4ec9b0',
+              warning: '#dcdcaa',
+              error: '#f14c4c'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    * { box-sizing: border-box; }
+    body { overflow: hidden; }
+    .scrollbar-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+    .scrollbar-thin::-webkit-scrollbar-track { background: #1e1e1e; }
+    .scrollbar-thin::-webkit-scrollbar-thumb { background: #424242; border-radius: 4px; }
+    .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: #555; }
+    .file-item:hover { background: rgba(255,255,255,0.05); }
+    .file-item.active { background: #37373d; }
+    .tab { border-bottom: 2px solid transparent; }
+    .tab.active { border-bottom-color: #0078d4; background: #1e1e1e; }
+    .tab:hover { background: rgba(255,255,255,0.05); }
+    .console-line { font-family: 'JetBrains Mono', monospace; }
+    .console-line.error { color: #f14c4c; }
+    .console-line.success { color: #4ec9b0; }
+    .console-line.info { color: #3794ff; }
+    .console-line.output { color: #9cdcfe; }
+    .context-menu { position: fixed; z-index: 1000; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    .deploying { animation: pulse 1.5s infinite; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .status-dot.running { background: #4ec9b0; box-shadow: 0 0 6px #4ec9b0; }
+    .status-dot.stopped { background: #808080; }
+    .status-dot.deploying { background: #dcdcaa; animation: pulse 1s infinite; }
+    .status-dot.failed { background: #f14c4c; }
+    .status-dot.not-deployed { background: #555; }
+    .monaco-editor { height: 100% !important; }
+    .progress-bar { transition: width 0.3s ease; }
+  </style>
+</head>
+<body class="bg-editor-bg text-editor-text font-sans h-screen flex flex-col">
+  
+  <header class="bg-editor-sidebar border-b border-editor-border px-4 py-2 flex items-center justify-between shrink-0">
+    <div class="flex items-center gap-3">
+      <div class="flex items-center gap-2">
+        <svg class="w-6 h-6 text-editor-accent" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+        </svg>
+        <h1 class="text-lg font-semibold text-white">Cloud Bot Manager</h1>
+      </div>
+      <span class="text-xs text-gray-500 border-l border-editor-border pl-3 ml-2">Google Cloud Run</span>
+    </div>
+    
+    <div class="flex items-center gap-2">
+      <button id="createBotBtn" class="flex items-center gap-2 px-3 py-1.5 bg-editor-accent hover:bg-blue-600 text-white text-sm rounded transition">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+        </svg>
+        New Bot
+      </button>
+      <button id="uploadBtn" class="flex items-center gap-2 px-3 py-1.5 bg-editor-active hover:bg-editor-border text-gray-300 text-sm rounded transition">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+        </svg>
+        Upload
+      </button>
+      <input type="file" id="fileInput" accept=".js" class="hidden">
+    </div>
+  </header>
+
+  <div class="flex-1 flex overflow-hidden">
+    
+    <aside class="w-64 bg-editor-sidebar border-r border-editor-border flex flex-col shrink-0">
+      <div class="p-3 border-b border-editor-border">
+        <div class="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">Bots</div>
+        <div id="botsList" class="space-y-1">
+          <div class="text-gray-500 text-sm py-4 text-center">Loading...</div>
+        </div>
+      </div>
+      
+      <div class="flex-1 overflow-hidden flex flex-col" id="fileExplorerSection" style="display: none;">
+        <div class="p-3 border-b border-editor-border flex items-center justify-between">
+          <div class="text-xs text-gray-500 uppercase tracking-wider font-semibold">Files</div>
+          <div class="flex items-center gap-1">
+            <button id="newFileBtn" class="p-1 hover:bg-editor-active rounded" title="New File">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+              </svg>
+            </button>
+            <button id="newFolderBtn" class="p-1 hover:bg-editor-active rounded" title="New Folder">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div id="fileTree" class="flex-1 overflow-y-auto scrollbar-thin p-2 text-sm"></div>
+      </div>
+    </aside>
+
+    <main class="flex-1 flex flex-col overflow-hidden">
+      
+      <div class="flex border-b border-editor-border bg-editor-sidebar shrink-0">
+        <button class="tab active px-4 py-2 text-sm flex items-center gap-2" data-tab="editor">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>
+          </svg>
+          Editor
+        </button>
+        <button class="tab px-4 py-2 text-sm flex items-center gap-2" data-tab="console">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+          </svg>
+          Console
+          <span id="consoleCount" class="hidden px-1.5 py-0.5 bg-editor-accent text-white text-xs rounded-full">0</span>
+        </button>
+        <button class="tab px-4 py-2 text-sm flex items-center gap-2" data-tab="settings">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+          </svg>
+          Settings
+        </button>
+      </div>
+
+      <div id="editorPanel" class="flex-1 flex flex-col overflow-hidden">
+        <div id="openTabs" class="flex bg-editor-sidebar border-b border-editor-border shrink-0 overflow-x-auto"></div>
+        
+        <div id="editorContainer" class="flex-1 relative">
+          <div id="welcomeScreen" class="absolute inset-0 flex items-center justify-center text-gray-500">
+            <div class="text-center">
+              <svg class="w-16 h-16 mx-auto mb-4 opacity-30" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+              </svg>
+              <p class="text-lg mb-2">Welcome to Cloud Bot Manager</p>
+              <p class="text-sm">Select a bot from the sidebar to start editing</p>
+            </div>
+          </div>
+          <div id="monacoEditor" class="absolute inset-0" style="display: none;"></div>
+        </div>
+      </div>
+
+      <div id="consolePanel" class="flex-1 flex flex-col overflow-hidden" style="display: none;">
+        <div class="flex items-center justify-between p-2 border-b border-editor-border bg-editor-sidebar shrink-0">
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-medium">Console Output</span>
+            <span id="consoleBotName" class="text-xs text-gray-500"></span>
+          </div>
+          <div class="flex items-center gap-2">
+            <button id="fetchLogsBtn" class="px-2 py-1 text-xs bg-editor-active hover:bg-editor-border rounded transition">
+              Fetch Cloud Logs
+            </button>
+            <button id="clearConsoleBtn" class="px-2 py-1 text-xs bg-editor-active hover:bg-editor-border rounded transition">
+              Clear
+            </button>
+          </div>
+        </div>
+        <div id="consoleOutput" class="flex-1 overflow-y-auto scrollbar-thin p-3 font-mono text-sm bg-black/20"></div>
+      </div>
+
+      <div id="settingsPanel" class="flex-1 overflow-y-auto scrollbar-thin p-6" style="display: none;">
+        <div id="noSettingsMsg" class="text-center text-gray-500 py-12">
+          <svg class="w-12 h-12 mx-auto mb-4 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+          </svg>
+          <p>Select a bot to configure its settings</p>
+        </div>
+        
+        <div id="settingsContent" style="display: none;" class="max-w-2xl">
+          <h2 class="text-xl font-semibold mb-6" id="settingsBotName">Bot Settings</h2>
+          
+          <div class="space-y-6">
+            <div class="bg-editor-sidebar rounded-lg p-4 border border-editor-border">
+              <label class="block text-sm font-medium mb-2">Startup Command</label>
+              <input type="text" id="startCommand" class="w-full bg-editor-bg border border-editor-border rounded px-3 py-2 text-sm font-mono focus:border-editor-accent focus:outline-none" placeholder="node index.js">
+              <p class="text-xs text-gray-500 mt-1">Command to run when the bot starts</p>
+            </div>
+            
+            <div class="bg-editor-sidebar rounded-lg p-4 border border-editor-border">
+              <label class="block text-sm font-medium mb-2">Dependencies</label>
+              <textarea id="dependencies" rows="4" class="w-full bg-editor-bg border border-editor-border rounded px-3 py-2 text-sm font-mono focus:border-editor-accent focus:outline-none" placeholder='{"node-telegram-bot-api": "^0.61.0"}'></textarea>
+              <p class="text-xs text-gray-500 mt-1">JSON object of npm dependencies</p>
+            </div>
+            
+            <div class="bg-editor-sidebar rounded-lg p-4 border border-editor-border">
+              <label class="block text-sm font-medium mb-2">Dockerfile</label>
+              <textarea id="dockerfile" rows="8" class="w-full bg-editor-bg border border-editor-border rounded px-3 py-2 text-sm font-mono focus:border-editor-accent focus:outline-none"></textarea>
+              <p class="text-xs text-gray-500 mt-1">Custom Dockerfile for building the container</p>
+            </div>
+            
+            <button id="saveSettingsBtn" class="px-4 py-2 bg-editor-accent hover:bg-blue-600 text-white rounded transition">
+              Save Settings
+            </button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <footer class="bg-editor-sidebar border-t border-editor-border px-4 py-1.5 flex items-center justify-between text-xs text-gray-500 shrink-0">
+    <div class="flex items-center gap-4">
+      <span id="statusText">Ready</span>
+      <div id="progressContainer" class="hidden flex items-center gap-2">
+        <div class="w-32 h-1.5 bg-editor-border rounded-full overflow-hidden">
+          <div id="progressBar" class="progress-bar h-full bg-editor-accent rounded-full" style="width: 0%"></div>
+        </div>
+        <span id="progressText">0%</span>
+      </div>
+    </div>
+    <div class="flex items-center gap-4">
+      <span id="currentBotStatus"></span>
+      <span id="connectionStatus" class="flex items-center gap-1">
+        <span class="w-2 h-2 rounded-full bg-gray-500"></span>
+        Connecting...
+      </span>
+    </div>
+  </footer>
+
+  <div id="contextMenu" class="context-menu hidden bg-editor-sidebar border border-editor-border rounded shadow-lg py-1 min-w-[160px]">
+    <button class="w-full px-3 py-1.5 text-left text-sm hover:bg-editor-active flex items-center gap-2" data-action="rename">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+      </svg>
+      Rename
+    </button>
+    <button class="w-full px-3 py-1.5 text-left text-sm hover:bg-editor-active flex items-center gap-2 text-red-400" data-action="delete">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+      </svg>
+      Delete
+    </button>
+  </div>
+
+  <div id="modal" class="fixed inset-0 bg-black/50 items-center justify-center hidden" style="z-index: 100;">
+    <div class="bg-editor-sidebar border border-editor-border rounded-lg p-6 w-96 max-w-full mx-4">
+      <h3 id="modalTitle" class="text-lg font-semibold mb-4">Modal</h3>
+      <input type="text" id="modalInput" class="w-full bg-editor-bg border border-editor-border rounded px-3 py-2 text-sm focus:border-editor-accent focus:outline-none mb-4">
+      <div class="flex justify-end gap-2">
+        <button id="modalCancel" class="px-4 py-2 text-sm bg-editor-active hover:bg-editor-border rounded transition">Cancel</button>
+        <button id="modalConfirm" class="px-4 py-2 text-sm bg-editor-accent hover:bg-blue-600 text-white rounded transition">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_URL = '';
+    let socket;
+    let currentBot = null;
+    let currentFile = null;
+    let openFiles = [];
+    let monacoEditor = null;
+    let bots = [];
+    let consoleLogs = [];
+
+    require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs' } });
+    require(['vs/editor/editor.main'], function() {
+      monaco.editor.defineTheme('cloudBotTheme', {
+        base: 'vs-dark',
+        inherit: true,
+        rules: [],
+        colors: {
+          'editor.background': '#1e1e1e',
+          'editor.lineHighlightBackground': '#2a2a2a',
+          'editorCursor.foreground': '#0078d4'
+        }
+      });
+      
+      monacoEditor = monaco.editor.create(document.getElementById('monacoEditor'), {
+        value: '',
+        language: 'javascript',
+        theme: 'cloudBotTheme',
+        fontSize: 14,
+        fontFamily: "'JetBrains Mono', monospace",
+        minimap: { enabled: true },
+        automaticLayout: true,
+        wordWrap: 'on',
+        scrollBeyondLastLine: false,
+        padding: { top: 10 }
+      });
+
+      monacoEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, saveCurrentFile);
+    });
+
+    function initSocket() {
+      socket = io();
+      
+      socket.on('connect', () => {
+        updateConnectionStatus(true);
+      });
+      
+      socket.on('disconnect', () => {
+        updateConnectionStatus(false);
+      });
+      
+      socket.on('log', (data) => {
+        addConsoleLog(data);
+      });
+      
+      socket.on('deploymentStatus', (data) => {
+        updateBotStatus(data.botName, data.status, data.progress);
+      });
+    }
+
+    function updateConnectionStatus(connected) {
+      const el = document.getElementById('connectionStatus');
+      if (connected) {
+        el.innerHTML = '<span class="w-2 h-2 rounded-full bg-green-500"></span> Connected';
+      } else {
+        el.innerHTML = '<span class="w-2 h-2 rounded-full bg-red-500"></span> Disconnected';
+      }
+    }
+
+    function addConsoleLog(data) {
+      consoleLogs.push(data);
+      if (consoleLogs.length > 500) consoleLogs.shift();
+      
+      const output = document.getElementById('consoleOutput');
+      const line = document.createElement('div');
+      line.className = `console-line ${data.type} py-0.5`;
+      
+      const time = new Date(data.timestamp).toLocaleTimeString();
+      line.innerHTML = `<span class="text-gray-500">[${time}]</span> <span class="text-gray-400">[${data.botName}]</span> ${escapeHtml(data.message)}`;
+      
+      output.appendChild(line);
+      output.scrollTop = output.scrollHeight;
+      
+      updateConsoleCount();
+    }
+
+    function updateConsoleCount() {
+      const count = document.getElementById('consoleCount');
+      const newLogs = consoleLogs.filter(l => l.type === 'error' || l.type === 'success').length;
+      if (newLogs > 0) {
+        count.textContent = newLogs > 99 ? '99+' : newLogs;
+        count.classList.remove('hidden');
+      }
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    async function loadBots() {
+      try {
+        const res = await fetch(`${API_URL}/api/bots`);
+        const data = await res.json();
+        bots = data.bots || [];
+        renderBotsList();
+      } catch (err) {
+        console.error('Failed to load bots:', err);
+      }
+    }
+
+    function renderBotsList() {
+      const list = document.getElementById('botsList');
+      
+      if (bots.length === 0) {
+        list.innerHTML = `
+          <div class="text-gray-500 text-sm py-4 text-center">
+            <p>No bots yet</p>
+            <p class="text-xs mt-1">Create or upload a bot to start</p>
+          </div>
+        `;
+        return;
+      }
+      
+      list.innerHTML = bots.map(bot => `
+        <div class="file-item ${currentBot === bot.name ? 'active' : ''} flex items-center justify-between p-2 rounded cursor-pointer group" data-bot="${bot.name}">
+          <div class="flex items-center gap-2 flex-1 min-w-0">
+            <span class="status-dot ${bot.status}" title="${bot.status}"></span>
+            <span class="truncate">${bot.name}</span>
+          </div>
+          <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
+            ${getActionButtons(bot)}
+          </div>
+        </div>
+      `).join('');
+      
+      list.querySelectorAll('[data-bot]').forEach(el => {
+        el.addEventListener('click', (e) => {
+          if (!e.target.closest('button')) {
+            selectBot(el.dataset.bot);
+          }
+        });
+      });
+    }
+
+    function getActionButtons(bot) {
+      const isDeploying = ['deploying', 'restarting', 'stopping'].includes(bot.status);
+      
+      if (isDeploying) {
+        return `<span class="text-xs text-yellow-400 deploying">${bot.status}...</span>`;
+      }
+      
+      if (bot.status === 'running') {
+        return `
+          <button onclick="event.stopPropagation(); restartBot('${bot.name}')" class="p-1 hover:bg-editor-border rounded" title="Restart">
+            <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+          </button>
+          <button onclick="event.stopPropagation(); stopBot('${bot.name}')" class="p-1 hover:bg-editor-border rounded" title="Stop">
+            <svg class="w-3.5 h-3.5 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"/>
+            </svg>
+          </button>
+        `;
+      }
+      
+      return `
+        <button onclick="event.stopPropagation(); deployBot('${bot.name}')" class="p-1 hover:bg-editor-border rounded" title="Deploy">
+          <svg class="w-3.5 h-3.5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+        </button>
+        <button onclick="event.stopPropagation(); deleteBot('${bot.name}')" class="p-1 hover:bg-editor-border rounded" title="Delete">
+          <svg class="w-3.5 h-3.5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+          </svg>
+        </button>
+      `;
+    }
+
+    function updateBotStatus(botName, status, progress) {
+      const bot = bots.find(b => b.name === botName);
+      if (bot) {
+        bot.status = status;
+        bot.progress = progress;
+      }
+      renderBotsList();
+      
+      if (progress !== null) {
+        document.getElementById('progressContainer').classList.remove('hidden');
+        document.getElementById('progressBar').style.width = `${progress}%`;
+        document.getElementById('progressText').textContent = `${progress}%`;
+        document.getElementById('statusText').textContent = `${status.charAt(0).toUpperCase() + status.slice(1)} ${botName}...`;
+      }
+      
+      if (status === 'running' || status === 'failed' || status === 'stopped') {
+        setTimeout(() => {
+          document.getElementById('progressContainer').classList.add('hidden');
+          document.getElementById('statusText').textContent = 'Ready';
+        }, 2000);
+      }
+      
+      if (currentBot === botName) {
+        updateCurrentBotStatus(status);
+      }
+    }
+
+    function updateCurrentBotStatus(status) {
+      const el = document.getElementById('currentBotStatus');
+      const colors = {
+        running: 'text-green-400',
+        stopped: 'text-gray-400',
+        deploying: 'text-yellow-400',
+        failed: 'text-red-400',
+        'not-deployed': 'text-gray-500'
+      };
+      el.className = `flex items-center gap-1 ${colors[status] || 'text-gray-400'}`;
+      el.innerHTML = `<span class="status-dot ${status}"></span> ${status.replace('-', ' ')}`;
+    }
+
+    async function selectBot(botName) {
+      currentBot = botName;
+      renderBotsList();
+      
+      document.getElementById('fileExplorerSection').style.display = 'flex';
+      document.getElementById('consoleBotName').textContent = `- ${botName}`;
+      
+      const bot = bots.find(b => b.name === botName);
+      if (bot) {
+        updateCurrentBotStatus(bot.status);
+      }
+      
+      await loadFiles();
+      await loadSettings();
+    }
+
+    async function loadFiles() {
+      if (!currentBot) return;
+      
+      try {
+        const res = await fetch(`${API_URL}/api/bots/${currentBot}/files`);
+        const data = await res.json();
+        renderFileTree(data.files);
+      } catch (err) {
+        console.error('Failed to load files:', err);
+      }
+    }
+
+    function renderFileTree(files, container = document.getElementById('fileTree'), level = 0) {
+      if (level === 0) container.innerHTML = '';
+      
+      files.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'file-item flex items-center gap-2 px-2 py-1 rounded cursor-pointer';
+        div.style.paddingLeft = `${level * 16 + 8}px`;
+        div.dataset.path = item.path;
+        div.dataset.type = item.type;
+        
+        if (item.type === 'folder') {
+          div.innerHTML = `
+            <svg class="w-4 h-4 text-yellow-400" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
+            </svg>
+            <span>${item.name}</span>
+          `;
+        } else {
+          const icon = getFileIcon(item.name);
+          div.innerHTML = `${icon}<span>${item.name}</span>`;
+          div.addEventListener('click', () => openFile(item.path));
+        }
+        
+        div.addEventListener('contextmenu', (e) => showContextMenu(e, item.path, item.type));
+        
+        container.appendChild(div);
+        
+        if (item.children) {
+          renderFileTree(item.children, container, level + 1);
+        }
+      });
+    }
+
+    function getFileIcon(filename) {
+      const ext = filename.split('.').pop().toLowerCase();
+      const icons = {
+        js: '<svg class="w-4 h-4 text-yellow-300" fill="currentColor" viewBox="0 0 24 24"><path d="M3 3h18v18H3V3zm16.525 13.707c-.131-.821-.666-1.511-2.252-2.155-.552-.259-1.165-.438-1.349-.854-.068-.248-.078-.382-.034-.529.113-.484.687-.629 1.137-.495.293.086.567.304.738.594.794-.52.794-.52 1.349-.871-.202-.322-.308-.463-.442-.613-.508-.573-1.18-.844-2.267-.834l-.571.071c-.547.126-1.066.408-1.369.778-.927 1.105-.664 3.031.492 3.827 1.144.817 2.817.995 3.029 1.763.206.898-.666 1.185-1.499 1.082-.614-.095-.947-.398-1.318-.858l-1.391.812c.159.329.345.481.573.712.993.98 3.474 1.058 3.921-.664.016-.056.137-.417.077-.959l-.003-.001zM9.078 13.038c.525 1.008.162 1.79-.355 2.212-.494.404-1.161.523-1.773.394-.556-.118-.979-.439-1.255-.852l1.3-.813c.163.295.351.501.655.575.304.074.624-.024.787-.243.146-.197.174-.455.13-.707-.044-.252-.178-.459-.549-.727-.55-.382-.98-.699-1.193-1.113-.23-.421-.326-.989-.185-1.557.101-.407.339-.752.63-.98.291-.227.649-.38 1.038-.426.761-.096 1.538.158 1.991.643.179.189.312.423.412.691l-1.33.708c-.141-.388-.471-.631-.859-.58-.188.026-.348.126-.449.285-.101.159-.141.38-.109.605.032.224.127.421.277.577l1.19.952z"/></svg>',
+        json: '<svg class="w-4 h-4 text-yellow-500" fill="currentColor" viewBox="0 0 24 24"><path d="M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2zm3.5 6.5L9.91 12l-1.41 2.5h1.14l.8-1.42.8 1.42h1.14l-1.41-2.5L12.38 9.5h-1.14l-.74 1.32-.74-1.32H8.5zm7 0L13.09 12l1.41 2.5h-1.14l-.8-1.42-.8 1.42H10.62l1.41-2.5L10.62 9.5h1.14l.74 1.32.74-1.32h1.26z"/></svg>',
+        md: '<svg class="w-4 h-4 text-blue-400" fill="currentColor" viewBox="0 0 24 24"><path d="M20.56 18H3.44C2.65 18 2 17.37 2 16.59V7.41C2 6.63 2.65 6 3.44 6h17.12c.79 0 1.44.63 1.44 1.41v9.18c0 .78-.65 1.41-1.44 1.41zM6.81 15.19v-3.66l1.92 2.35 1.92-2.35v3.66h1.93V8.81h-1.93l-1.92 2.35-1.92-2.35H4.89v6.38h1.92zM19.69 12h-1.92V8.81h-1.92V12h-1.93l2.89 3.28L19.69 12z"/></svg>',
+        dockerfile: '<svg class="w-4 h-4 text-blue-500" fill="currentColor" viewBox="0 0 24 24"><path d="M13.983 11.078h2.119a.186.186 0 00.186-.185V9.006a.186.186 0 00-.186-.186h-2.119a.185.185 0 00-.185.185v1.888c0 .102.083.185.185.185m-2.954-5.43h2.118a.186.186 0 00.186-.186V3.574a.186.186 0 00-.186-.185h-2.118a.185.185 0 00-.185.185v1.888c0 .102.082.185.185.186m0 2.716h2.118a.187.187 0 00.186-.186V6.29a.186.186 0 00-.186-.185h-2.118a.185.185 0 00-.185.185v1.887c0 .102.082.185.185.186m-2.93 0h2.12a.186.186 0 00.184-.186V6.29a.185.185 0 00-.185-.185H8.1a.185.185 0 00-.185.185v1.888c0 .102.083.185.185.186m-2.964 0h2.119a.186.186 0 00.185-.186V6.29a.185.185 0 00-.185-.185H5.136a.186.186 0 00-.186.185v1.888c0 .102.084.185.186.186m5.893 2.715h2.118a.186.186 0 00.186-.185V9.006a.186.186 0 00-.186-.186h-2.118a.185.185 0 00-.185.185v1.888c0 .102.082.185.185.185m-2.93 0h2.12a.185.185 0 00.184-.185V9.006a.185.185 0 00-.184-.186h-2.12a.185.185 0 00-.184.185v1.888c0 .102.083.185.185.185m-2.964 0h2.119a.185.185 0 00.185-.185V9.006a.185.185 0 00-.184-.186h-2.12a.186.186 0 00-.186.186v1.887c0 .102.084.185.186.185m-2.92 0h2.12a.185.185 0 00.184-.185V9.006a.185.185 0 00-.184-.186h-2.12a.185.185 0 00-.184.185v1.888c0 .102.082.185.185.185M23.763 9.89c-.065-.051-.672-.51-1.954-.51-.338.001-.676.03-1.01.087-.248-1.7-1.653-2.53-1.716-2.566l-.344-.199-.226.327c-.284.438-.49.922-.612 1.43-.23.97-.09 1.882.403 2.661-.595.332-1.55.413-1.744.42H.751a.751.751 0 00-.75.748 11.376 11.376 0 00.692 4.062c.545 1.428 1.355 2.48 2.41 3.124 1.18.723 3.1 1.137 5.275 1.137.983.003 1.963-.086 2.93-.266a12.248 12.248 0 003.823-1.389c.98-.567 1.86-1.288 2.61-2.136 1.252-1.418 1.998-2.997 2.553-4.4h.221c1.372 0 2.215-.549 2.68-1.009.309-.293.55-.65.707-1.046l.098-.288z"/></svg>'
+      };
+      
+      return icons[ext] || icons[filename.toLowerCase()] || '<svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>';
+    }
+
+    async function openFile(filePath) {
+      if (!currentBot) return;
+      
+      try {
+        const res = await fetch(`${API_URL}/api/bots/${currentBot}/file?filePath=${encodeURIComponent(filePath)}`);
+        const data = await res.json();
+        
+        if (!openFiles.find(f => f.path === filePath)) {
+          openFiles.push({ path: filePath, content: data.content, modified: false });
+        }
+        
+        currentFile = filePath;
+        renderOpenTabs();
+        
+        document.getElementById('welcomeScreen').style.display = 'none';
+        document.getElementById('monacoEditor').style.display = 'block';
+        
+        const ext = filePath.split('.').pop().toLowerCase();
+        const langMap = { js: 'javascript', json: 'json', md: 'markdown', dockerfile: 'dockerfile' };
+        
+        monacoEditor.setValue(data.content);
+        monaco.editor.setModelLanguage(monacoEditor.getModel(), langMap[ext] || 'plaintext');
+        
+        switchTab('editor');
+      } catch (err) {
+        console.error('Failed to open file:', err);
+      }
+    }
+
+    function renderOpenTabs() {
+      const container = document.getElementById('openTabs');
+      container.innerHTML = openFiles.map(file => `
+        <div class="flex items-center gap-1 px-3 py-1.5 border-r border-editor-border cursor-pointer ${currentFile === file.path ? 'bg-editor-bg' : 'bg-editor-sidebar hover:bg-editor-active'}" data-file="${file.path}">
+          ${getFileIcon(file.path.split('/').pop())}
+          <span class="text-sm">${file.path.split('/').pop()}</span>
+          ${file.modified ? '<span class="w-2 h-2 rounded-full bg-editor-accent"></span>' : ''}
+          <button class="ml-1 opacity-50 hover:opacity-100" onclick="event.stopPropagation(); closeFile('${file.path}')">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+      `).join('');
+      
+      container.querySelectorAll('[data-file]').forEach(el => {
+        el.addEventListener('click', () => {
+          const file = openFiles.find(f => f.path === el.dataset.file);
+          if (file) {
+            currentFile = file.path;
+            monacoEditor.setValue(file.content);
+            renderOpenTabs();
+          }
+        });
+      });
+    }
+
+    function closeFile(filePath) {
+      const idx = openFiles.findIndex(f => f.path === filePath);
+      if (idx === -1) return;
+      
+      openFiles.splice(idx, 1);
+      
+      if (currentFile === filePath) {
+        if (openFiles.length > 0) {
+          currentFile = openFiles[Math.max(0, idx - 1)].path;
+          const file = openFiles.find(f => f.path === currentFile);
+          monacoEditor.setValue(file.content);
+        } else {
+          currentFile = null;
+          document.getElementById('welcomeScreen').style.display = 'flex';
+          document.getElementById('monacoEditor').style.display = 'none';
+        }
+      }
+      
+      renderOpenTabs();
+    }
+
+    async function saveCurrentFile() {
+      if (!currentBot || !currentFile) return;
+      
+      const content = monacoEditor.getValue();
+      
+      try {
+        await fetch(`${API_URL}/api/bots/${currentBot}/file`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filePath: currentFile, content })
+        });
+        
+        const file = openFiles.find(f => f.path === currentFile);
+        if (file) {
+          file.content = content;
+          file.modified = false;
+        }
+        
+        renderOpenTabs();
+        showNotification('File saved', 'success');
+      } catch (err) {
+        showNotification('Failed to save file', 'error');
+      }
+    }
+
+    async function loadSettings() {
+      if (!currentBot) return;
+      
+      try {
+        const res = await fetch(`${API_URL}/api/bots/${currentBot}/config`);
+        const data = await res.json();
+        
+        document.getElementById('noSettingsMsg').style.display = 'none';
+        document.getElementById('settingsContent').style.display = 'block';
+        document.getElementById('settingsBotName').textContent = `${currentBot} Settings`;
+        
+        document.getElementById('startCommand').value = data.config.startCommand || 'node index.js';
+        document.getElementById('dependencies').value = JSON.stringify(data.config.dependencies || {}, null, 2);
+        document.getElementById('dockerfile').value = data.config.dockerfile || '';
+      } catch (err) {
+        console.error('Failed to load settings:', err);
+      }
+    }
+
+    async function saveSettings() {
+      if (!currentBot) return;
+      
+      try {
+        let deps = {};
+        try {
+          deps = JSON.parse(document.getElementById('dependencies').value);
+        } catch {}
+        
+        await fetch(`${API_URL}/api/bots/${currentBot}/config`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            startCommand: document.getElementById('startCommand').value,
+            dependencies: deps,
+            dockerfile: document.getElementById('dockerfile').value
+          })
+        });
+        
+        showNotification('Settings saved', 'success');
+      } catch (err) {
+        showNotification('Failed to save settings', 'error');
+      }
+    }
+
+    async function deployBot(botName) {
+      try {
+        await fetch(`${API_URL}/api/deploy/${botName}`, { method: 'POST' });
+      } catch (err) {
+        showNotification('Failed to start deployment', 'error');
+      }
+    }
+
+    async function stopBot(botName) {
+      try {
+        await fetch(`${API_URL}/api/stop/${botName}`, { method: 'POST' });
+      } catch (err) {
+        showNotification('Failed to stop bot', 'error');
+      }
+    }
+
+    async function restartBot(botName) {
+      try {
+        await fetch(`${API_URL}/api/restart/${botName}`, { method: 'POST' });
+      } catch (err) {
+        showNotification('Failed to restart bot', 'error');
+      }
+    }
+
+    async function deleteBot(botName) {
+      if (!confirm(`Delete ${botName}? This will remove it from Google Cloud.`)) return;
+      
+      try {
+        await fetch(`${API_URL}/api/delete/${botName}`, { method: 'DELETE' });
+        
+        if (currentBot === botName) {
+          currentBot = null;
+          openFiles = [];
+          currentFile = null;
+          document.getElementById('fileExplorerSection').style.display = 'none';
+          document.getElementById('welcomeScreen').style.display = 'flex';
+          document.getElementById('monacoEditor').style.display = 'none';
+        }
+        
+        loadBots();
+        showNotification(`${botName} deleted`, 'success');
+      } catch (err) {
+        showNotification('Failed to delete bot', 'error');
+      }
+    }
+
+    async function createBot() {
+      const name = await showModal('Create New Bot', 'Enter bot name:');
+      if (!name) return;
+      
+      try {
+        await fetch(`${API_URL}/api/bots`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name })
+        });
+        
+        await loadBots();
+        selectBot(name);
+        showNotification(`${name} created`, 'success');
+      } catch (err) {
+        showNotification('Failed to create bot', 'error');
+      }
+    }
+
+    async function createFile() {
+      if (!currentBot) return;
+      
+      const name = await showModal('New File', 'Enter file name:');
+      if (!name) return;
+      
+      try {
+        await fetch(`${API_URL}/api/bots/${currentBot}/file`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filePath: name, type: 'file' })
+        });
+        
+        await loadFiles();
+        openFile(name);
+      } catch (err) {
+        showNotification('Failed to create file', 'error');
+      }
+    }
+
+    async function createFolder() {
+      if (!currentBot) return;
+      
+      const name = await showModal('New Folder', 'Enter folder name:');
+      if (!name) return;
+      
+      try {
+        await fetch(`${API_URL}/api/bots/${currentBot}/file`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filePath: name, type: 'folder' })
+        });
+        
+        await loadFiles();
+      } catch (err) {
+        showNotification('Failed to create folder', 'error');
+      }
+    }
+
+    let contextTarget = null;
+
+    function showContextMenu(e, path, type) {
+      e.preventDefault();
+      contextTarget = { path, type };
+      
+      const menu = document.getElementById('contextMenu');
+      menu.classList.remove('hidden');
+      menu.style.left = `${e.clientX}px`;
+      menu.style.top = `${e.clientY}px`;
+    }
+
+    document.addEventListener('click', () => {
+      document.getElementById('contextMenu').classList.add('hidden');
+    });
+
+    document.querySelectorAll('#contextMenu button').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!contextTarget || !currentBot) return;
+        
+        const action = btn.dataset.action;
+        
+        if (action === 'rename') {
+          const newName = await showModal('Rename', 'Enter new name:', contextTarget.path.split('/').pop());
+          if (!newName) return;
+          
+          const dir = contextTarget.path.includes('/') 
+            ? contextTarget.path.substring(0, contextTarget.path.lastIndexOf('/') + 1)
+            : '';
+          
+          await fetch(`${API_URL}/api/bots/${currentBot}/rename`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ oldPath: contextTarget.path, newPath: dir + newName })
+          });
+          
+          loadFiles();
+        } else if (action === 'delete') {
+          if (!confirm(`Delete ${contextTarget.path}?`)) return;
+          
+          await fetch(`${API_URL}/api/bots/${currentBot}/file`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filePath: contextTarget.path })
+          });
+          
+          if (currentFile === contextTarget.path) {
+            closeFile(contextTarget.path);
+          }
+          
+          loadFiles();
+        }
+      });
+    });
+
+    function showModal(title, placeholder, defaultValue = '') {
+      return new Promise((resolve) => {
+        const modal = document.getElementById('modal');
+        document.getElementById('modalTitle').textContent = title;
+        document.getElementById('modalInput').placeholder = placeholder;
+        document.getElementById('modalInput').value = defaultValue;
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+        document.getElementById('modalInput').focus();
+        
+        const cleanup = () => {
+          modal.classList.add('hidden');
+          modal.classList.remove('flex');
+        };
+        
+        document.getElementById('modalCancel').onclick = () => {
+          cleanup();
+          resolve(null);
+        };
+        
+        document.getElementById('modalConfirm').onclick = () => {
+          const value = document.getElementById('modalInput').value.trim();
+          cleanup();
+          resolve(value || null);
+        };
+        
+        document.getElementById('modalInput').onkeydown = (e) => {
+          if (e.key === 'Enter') {
+            document.getElementById('modalConfirm').click();
+          } else if (e.key === 'Escape') {
+            document.getElementById('modalCancel').click();
+          }
+        };
+      });
+    }
+
+    function showNotification(message, type = 'info') {
+      const colors = { success: 'bg-green-600', error: 'bg-red-600', info: 'bg-blue-600' };
+      
+      const notif = document.createElement('div');
+      notif.className = `fixed top-4 right-4 px-4 py-2 rounded-lg text-white ${colors[type]} shadow-lg z-50`;
+      notif.textContent = message;
+      document.body.appendChild(notif);
+      
+      setTimeout(() => notif.remove(), 3000);
+    }
+
+    function switchTab(tabName) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+      
+      document.getElementById('editorPanel').style.display = tabName === 'editor' ? 'flex' : 'none';
+      document.getElementById('consolePanel').style.display = tabName === 'console' ? 'flex' : 'none';
+      document.getElementById('settingsPanel').style.display = tabName === 'settings' ? 'block' : 'none';
+      
+      if (tabName === 'console') {
+        document.getElementById('consoleCount').classList.add('hidden');
+      }
+    }
+
+    async function fetchCloudLogs() {
+      if (!currentBot) return;
+      
+      try {
+        const res = await fetch(`${API_URL}/api/logs/${currentBot}`);
+        const data = await res.json();
+        
+        if (data.logs && data.logs.length > 0) {
+          const output = document.getElementById('consoleOutput');
+          output.innerHTML += '<div class="console-line text-gray-500 border-t border-editor-border mt-2 pt-2">--- Cloud Logs ---</div>';
+          
+          data.logs.forEach(log => {
+            const line = document.createElement('div');
+            line.className = 'console-line output py-0.5';
+            line.textContent = log;
+            output.appendChild(line);
+          });
+          
+          output.scrollTop = output.scrollHeight;
+        }
+      } catch (err) {
+        showNotification('Failed to fetch cloud logs', 'error');
+      }
+    }
+
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+    });
+
+    document.getElementById('createBotBtn').addEventListener('click', createBot);
+    document.getElementById('uploadBtn').addEventListener('click', () => document.getElementById('fileInput').click());
+    document.getElementById('newFileBtn').addEventListener('click', createFile);
+    document.getElementById('newFolderBtn').addEventListener('click', createFolder);
+    document.getElementById('saveSettingsBtn').addEventListener('click', saveSettings);
+    document.getElementById('fetchLogsBtn').addEventListener('click', fetchCloudLogs);
+    document.getElementById('clearConsoleBtn').addEventListener('click', () => {
+      document.getElementById('consoleOutput').innerHTML = '';
+      consoleLogs = [];
+    });
+
+    document.getElementById('fileInput').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      
+      const formData = new FormData();
+      formData.append('botFile', file);
+      
+      try {
+        const res = await fetch(`${API_URL}/api/upload`, {
+          method: 'POST',
+          body: formData
+        });
+        
+        const data = await res.json();
+        if (data.success) {
+          showNotification(`${data.botName} uploaded`, 'success');
+          loadBots();
+        }
+      } catch (err) {
+        showNotification('Upload failed', 'error');
+      }
+      
+      e.target.value = '';
+    });
+
+    if (monacoEditor) {
+      monacoEditor.onDidChangeModelContent(() => {
+        const file = openFiles.find(f => f.path === currentFile);
+        if (file && file.content !== monacoEditor.getValue()) {
+          file.modified = true;
+          renderOpenTabs();
+        }
+      });
+    }
+
+    initSocket();
+    loadBots();
+  </script>
+</body>
+</html>

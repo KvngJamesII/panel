@@ -1,0 +1,17 @@
+{
+  "name": "gcloud-bot-manager",
+  "version": "2.0.0",
+  "description": "Professional Telegram Bot Deployment Panel for Google Cloud",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "chokidar": "^3.6.0",
+    "cors": "^2.8.5",
+    "express": "^4.22.1",
+    "multer": "^1.4.5-lts.1",
+    "socket.io": "^4.8.1"
+  }
+}
