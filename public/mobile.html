@@ -253,7 +253,20 @@
       const isDeploying = ['deploying', 'restarting', 'stopping'].includes(bot.status);
       
       if (isDeploying) {
-        return `<div class="flex items-center gap-2 text-sm text-yellow-600"><div class="animate-spin w-4 h-4 border-2 border-yellow-600 border-t-transparent rounded-full"></div>${bot.status}...</div>`;
+        return `
+          <div class="flex items-center justify-between w-full">
+            <div class="flex items-center gap-2 text-sm text-yellow-600">
+              <div class="animate-spin w-4 h-4 border-2 border-yellow-600 border-t-transparent rounded-full"></div>
+              ${bot.status}...
+            </div>
+            <button onclick="event.stopPropagation(); cancelDeployment('${bot.name}')" class="px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-sm font-medium active:bg-red-100 flex items-center gap-1">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+              </svg>
+              Cancel
+            </button>
+          </div>
+        `;
       }
       
       if (bot.status === 'running') {
@@ -366,6 +379,15 @@
         await fetch(`${API_URL}/api/restart/${name}`, { method: 'POST' });
       } catch (err) {
         showToast('Restart failed', 'error');
+      }
+    }
+
+    async function cancelDeployment(name) {
+      try {
+        await fetch(`${API_URL}/api/cancel-deployment/${name}`, { method: 'POST' });
+        showToast('Deployment cancelled', 'success');
+      } catch (err) {
+        showToast('Cancel failed', 'error');
       }
     }
 

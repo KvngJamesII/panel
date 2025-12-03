@@ -643,6 +643,28 @@ app.post('/api/restart/:botName', async (req, res) => {
   }
 });
 
+app.post('/api/cancel-deployment/:botName', async (req, res) => {
+  const validation = validateBotAccess(req.params.botName);
+  if (!validation) {
+    return res.status(400).json({ error: 'Invalid bot name' });
+  }
+  
+  const { sanitizedBotName } = validation;
+
+  try {
+    emitLog(sanitizedBotName, '🛑 Cancelling deployment...', 'info');
+    emitStatus(sanitizedBotName, 'failed', 0);
+    emitLog(sanitizedBotName, '❌ Deployment cancelled by user', 'error');
+
+    res.json({ 
+      success: true, 
+      message: 'Deployment cancelled'
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/stop/:botName', async (req, res) => {
   const validation = validateBotAccess(req.params.botName);
   if (!validation) {

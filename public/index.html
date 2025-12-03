@@ -419,7 +419,14 @@
       const isDeploying = ['deploying', 'restarting', 'stopping'].includes(bot.status);
       
       if (isDeploying) {
-        return `<span class="text-xs text-yellow-400 deploying">${bot.status}...</span>`;
+        return `
+          <button onclick="event.stopPropagation(); cancelDeployment('${bot.name}')" class="p-1 hover:bg-editor-border rounded" title="Cancel Deployment">
+            <svg class="w-3.5 h-3.5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+          <span class="text-xs text-yellow-400 deploying">${bot.status}...</span>
+        `;
       }
       
       if (bot.status === 'running') {
@@ -738,6 +745,15 @@
         await fetch(`${API_URL}/api/restart/${botName}`, { method: 'POST' });
       } catch (err) {
         showNotification('Failed to restart bot', 'error');
+      }
+    }
+
+    async function cancelDeployment(botName) {
+      try {
+        await fetch(`${API_URL}/api/cancel-deployment/${botName}`, { method: 'POST' });
+        showNotification('Deployment cancelled', 'success');
+      } catch (err) {
+        showNotification('Failed to cancel deployment', 'error');
       }
     }
 
