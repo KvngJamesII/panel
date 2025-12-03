@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Google Cloud Bot Manager</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900 text-white min-h-screen">
+  <div class="max-w-7xl mx-auto p-6">
+    <div class="mb-8">
+      <h1 class="text-3xl font-bold mb-2">🚀 Google Cloud Bot Manager</h1>
+      <p class="text-gray-400">Deploy and manage Telegram bots on GCP</p>
+    </div>
+
+    <!-- Upload Section -->
+    <div class="bg-gray-800 rounded-lg p-6 mb-6 border border-gray-700">
+      <label class="flex items-center justify-center gap-3 cursor-pointer hover:bg-gray-750 transition p-4 rounded-lg border-2 border-dashed border-gray-600 hover:border-blue-500">
+        <span class="text-lg">📤 Upload Bot File (.js)</span>
+        <input type="file" id="fileInput" accept=".js" class="hidden">
+      </label>
+      <div id="uploadStatus" class="mt-4 hidden"></div>
+    </div>
+
+    <!-- Bots Grid -->
+    <div id="botsGrid" class="grid md:grid-cols-2 gap-6 mb-6"></div>
+
+    <!-- Logs Panel -->
+    <div id="logsPanel" class="bg-gray-800 rounded-lg border border-gray-700 hidden">
+      <div class="flex justify-between items-center p-4 border-b border-gray-700">
+        <h3 class="text-lg font-bold" id="logsBotName">Logs</h3>
+        <button onclick="closeLogs()" class="text-gray-400 hover:text-white">✕</button>
+      </div>
+      <div id="logsContent" class="p-4 font-mono text-sm bg-black/30 h-64 overflow-y-auto"></div>
+    </div>
+  </div>
+
+  <script>
+    const API_URL = 'http://localhost:3000/api';
+    let currentBots = [];
+
+    // Load bots on page load
+    loadBots();
+
+    // File upload handler
+    document.getElementById('fileInput').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const formData = new FormData();
+      formData.append('botFile', file);
+
+      showUploadStatus('Uploading...', 'blue');
+
+      try {
+        const res = await fetch(`${API_URL}/upload`, {
+          method: 'POST',
+          body: formData
+        });
+
+        const data = await res.json();
+
+        if (data.success) {
+          showUploadStatus(`✅ ${data.botName} uploaded successfully!`, 'green');
+          loadBots();
+        } else {
+          showUploadStatus(`❌ ${data.error}`, 'red');
+        }
+      } catch (err) {
+        showUploadStatus(`❌ ${err.message}`, 'red');
+      }
+
+      e.target.value = '';
+    });
+
+    async function loadBots() {
+      try {
+        const res = await fetch(`${API_URL}/bots`);
+        const data = await res.json();
+        currentBots = data.bots || [];
+        renderBots();
+      } catch (err) {
+        console.error('Failed to load bots:', err);
+      }
+    }
+
+    function renderBots() {
+      const grid = document.getElementById('botsGrid');
+
+      if (currentBots.length === 0) {
+        grid.innerHTML = `
+          <div class="col-span-2 text-center py-12 text-gray-500">
+            <div class="text-6xl mb-4">📦</div>
+            <p>No bots uploaded yet. Upload a bot file to get started!</p>
+          </div>
+        `;
+        return;
+      }
+
+      grid.innerHTML = currentBots.map(bot => `
+        <div class="bg-gray-800 rounded-lg p-6 border border-gray-700 hover:border-blue-500 transition">
+          <div class="flex justify-between items-start mb-4">
+            <div>
+              <h3 class="text-xl font-bold mb-1">${bot.name}</h3>
+              <p class="text-sm text-gray-400">${bot.serviceName}</p>
+            </div>
+            <span class="px-3 py-1 rounded-full text-xs font-semibold ${
+              bot.status === 'running' 
+                ? 'bg-green-500/20 text-green-400' 
+                : 'bg-gray-600 text-gray-300'
+            }">
+              ${bot.status === 'running' ? '● Running' : '○ Stopped'}
+            </span>
+          </div>
+
+          <div class="flex gap-2">
+            ${bot.status === 'not-deployed' || bot.status === 'stopped' ? `
+              <button onclick="deployBot('${bot.name}')" class="flex items-center gap-2 bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg transition">
+                ▶️ Deploy
+              </button>
+            ` : `
+              <button onclick="stopBot('${bot.name}')" class="flex items-center gap-2 bg-orange-600 hover:bg-orange-700 px-4 py-2 rounded-lg transition">
+                ⏸️ Stop
+              </button>
+            `}
+
+            <button onclick="showLogs('${bot.name}')" class="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg transition">
+              👁️ Logs
+            </button>
+
+            <button onclick="deleteBot('${bot.name}')" class="flex items-center gap-2 bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg transition ml-auto">
+              🗑️ Delete
+            </button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    async function deployBot(botName) {
+      if (!confirm(`Deploy ${botName} to Google Cloud Run?`)) return;
+
+      try {
+        showUploadStatus(`🚀 Deploying ${botName}...`, 'blue');
+
+        const res = await fetch(`${API_URL}/deploy/${botName}`, {
+          method: 'POST'
+        });
+
+        const data = await res.json();
+
+        if (data.success) {
+          showUploadStatus(`✅ ${botName} deployed successfully!`, 'green');
+          loadBots();
+        } else {
+          showUploadStatus(`❌ Deployment failed: ${data.error}`, 'red');
+        }
+      } catch (err) {
+        showUploadStatus(`❌ ${err.message}`, 'red');
+      }
+    }
+
+    async function stopBot(botName) {
+      try {
+        showUploadStatus(`⏸️ Stopping ${botName}...`, 'blue');
+
+        const res = await fetch(`${API_URL}/stop/${botName}`, {
+          method: 'POST'
+        });
+
+        const data = await res.json();
+
+        if (data.success) {
+          showUploadStatus(`✅ ${botName} stopped`, 'green');
+          loadBots();
+        }
+      } catch (err) {
+        showUploadStatus(`❌ ${err.message}`, 'red');
+      }
+    }
+
+    async function deleteBot(botName) {
+      if (!confirm(`Delete ${botName}? This will remove it from Google Cloud.`)) return;
+
+      try {
+        showUploadStatus(`🗑️ Deleting ${botName}...`, 'blue');
+
+        const res = await fetch(`${API_URL}/delete/${botName}`, {
+          method: 'DELETE'
+        });
+
+        const data = await res.json();
+
+        if (data.success) {
+          showUploadStatus(`✅ ${botName} deleted`, 'green');
+          loadBots();
+        }
+      } catch (err) {
+        showUploadStatus(`❌ ${err.message}`, 'red');
+      }
+    }
+
+    async function showLogs(botName) {
+      document.getElementById('logsBotName').textContent = `Logs: ${botName}`;
+      document.getElementById('logsPanel').classList.remove('hidden');
+      document.getElementById('logsContent').innerHTML = '<div class="text-gray-400">Loading logs...</div>';
+
+      try {
+        const res = await fetch(`${API_URL}/logs/${botName}`);
+        const data = await res.json();
+
+        if (data.success && data.logs.length > 0) {
+          document.getElementById('logsContent').innerHTML = data.logs
+            .map(log => `<div class="mb-1 text-green-400">${log}</div>`)
+            .join('');
+        } else {
+          document.getElementById('logsContent').innerHTML = '<div class="text-gray-500">No logs available yet</div>';
+        }
+      } catch (err) {
+        document.getElementById('logsContent').innerHTML = `<div class="text-red-400">Error: ${err.message}</div>`;
+      }
+    }
+
+    function closeLogs() {
+      document.getElementById('logsPanel').classList.add('hidden');
+    }
+
+    function showUploadStatus(message, color) {
+      const status = document.getElementById('uploadStatus');
+      status.className = `mt-4 p-3 rounded-lg text-${color}-400 bg-${color}-900/30 border border-${color}-700`;
+      status.textContent = message;
+      status.classList.remove('hidden');
+
+      setTimeout(() => {
+        status.classList.add('hidden');
+      }, 5000);
+    }
+  </script>
+</body>
+</html>
