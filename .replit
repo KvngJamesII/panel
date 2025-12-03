@@ -28,6 +28,7 @@ outputType = "webview"
 
 [nix]
 channel = "stable-25_05"
+packages = ["google-cloud-sdk"]
 
 [[ports]]
 localPort = 5000
