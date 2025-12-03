@@ -79,7 +79,7 @@
       <svg class="w-16 h-16 mx-auto mb-4 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
       </svg>
-      <p>Select a bot to view files</p>
+      <p>Tap on a bot to edit its files</p>
     </div>
     
     <div id="filesContent" class="hidden">
@@ -101,6 +101,33 @@
       <div id="filesList" class="p-4 space-y-2"></div>
     </div>
     <input type="file" id="fileUploadInput" class="hidden">
+  </div>
+
+  <!-- Mobile File Editor View -->
+  <div id="mobileEditorView" class="hidden fixed inset-0 bg-white z-50 flex flex-col">
+    <div class="bg-white border-b px-4 py-3 flex items-center justify-between">
+      <button id="backToBotsBtn" class="p-2 text-gray-600 active:bg-gray-100 rounded-lg">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+        </svg>
+      </button>
+      <h2 id="editorBotName" class="font-semibold text-gray-900"></h2>
+      <div class="flex gap-2">
+        <button id="editorUploadBtn" class="p-2 bg-blue-600 text-white rounded-lg active:bg-blue-700">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+          </svg>
+        </button>
+        <button id="editorNewFileBtn" class="p-2 bg-green-600 text-white rounded-lg active:bg-green-700">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+    
+    <div id="editorFilesList" class="flex-1 overflow-y-auto p-4 space-y-2"></div>
+    <input type="file" id="editorFileUploadInput" class="hidden">
   </div>
 
   <!-- Settings View -->
@@ -291,7 +318,7 @@
       list.querySelectorAll('.bot-card').forEach(el => {
         el.addEventListener('click', (e) => {
           if (!e.target.closest('button')) {
-            selectBot(el.dataset.bot);
+            openMobileEditor(el.dataset.bot);
           }
         });
       });
@@ -365,6 +392,132 @@
       await loadFiles();
       switchView('settings');
     }
+
+    async function openMobileEditor(botName) {
+      currentBot = botName;
+      document.getElementById('editorBotName').textContent = botName;
+      document.getElementById('mobileEditorView').classList.remove('hidden');
+      document.getElementById('botsView').classList.add('hidden');
+      await loadEditorFiles();
+    }
+
+    function closeMobileEditor() {
+      document.getElementById('mobileEditorView').classList.add('hidden');
+      document.getElementById('botsView').classList.remove('hidden');
+      currentBot = null;
+    }
+
+    async function loadEditorFiles() {
+      if (!currentBot) return;
+      
+      try {
+        const res = await fetch(`${API_URL}/api/bots/${currentBot}/files`);
+        const data = await res.json();
+        renderEditorFilesList(data.files || []);
+      } catch (err) {
+        console.error('Failed to load files:', err);
+        showToast('Failed to load files', 'error');
+      }
+    }
+
+    function renderEditorFilesList(files, container = document.getElementById('editorFilesList'), level = 0) {
+      if (level === 0) container.innerHTML = '';
+      
+      files.forEach(file => {
+        const div = document.createElement('div');
+        div.className = 'bg-white rounded-lg p-3 shadow-sm border border-gray-200';
+        div.style.marginLeft = `${level * 16}px`;
+        
+        if (file.type === 'folder') {
+          div.innerHTML = `
+            <div class="flex items-center gap-3">
+              <svg class="w-5 h-5 text-yellow-500 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
+              </svg>
+              <span class="flex-1 font-medium text-gray-900">${file.name}</span>
+            </div>
+          `;
+          container.appendChild(div);
+          if (file.children) {
+            renderEditorFilesList(file.children, container, level + 1);
+          }
+        } else {
+          div.innerHTML = `
+            <div class="flex items-center gap-3">
+              <svg class="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+              </svg>
+              <span class="flex-1 text-gray-900 truncate">${file.name}</span>
+              <div class="flex gap-1 flex-shrink-0">
+                <button onclick="event.stopPropagation(); editFile('${file.path}')" class="p-2 text-blue-600 active:bg-blue-50 rounded">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                  </svg>
+                </button>
+                <button onclick="event.stopPropagation(); deleteFile('${file.path}')" class="p-2 text-red-600 active:bg-red-50 rounded">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          `;
+          container.appendChild(div);
+        }
+      });
+    }
+
+    async function createNewFileInEditor() {
+      if (!currentBot) {
+        showToast('Select a bot first', 'error');
+        return;
+      }
+      
+      const fileName = await showModal('New File', 'Enter file name:');
+      if (!fileName) return;
+      
+      try {
+        await fetch(`${API_URL}/api/bots/${currentBot}/file`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filePath: fileName, type: 'file' })
+        });
+        
+        showToast('File created', 'success');
+        loadEditorFiles();
+      } catch (err) {
+        showToast('Create failed', 'error');
+      }
+    }
+
+    async function uploadFileInEditor() {
+      if (!currentBot) {
+        showToast('Select a bot first', 'error');
+        return;
+      }
+      document.getElementById('editorFileUploadInput').click();
+    }
+
+    document.getElementById('editorFileUploadInput').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file || !currentBot) return;
+      
+      try {
+        const content = await file.text();
+        await fetch(`${API_URL}/api/bots/${currentBot}/file`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filePath: file.name, content })
+        });
+        
+        showToast('File uploaded', 'success');
+        loadEditorFiles();
+      } catch (err) {
+        showToast('Upload failed', 'error');
+      }
+      
+      e.target.value = '';
+    });
 
     async function loadFiles() {
       if (!currentBot) return;
@@ -736,6 +889,10 @@
     document.getElementById('actionSheet').addEventListener('click', (e) => {
       if (e.target.id === 'actionSheet') hideActionSheet();
     });
+
+    document.getElementById('backToBotsBtn').addEventListener('click', closeMobileEditor);
+    document.getElementById('editorNewFileBtn').addEventListener('click', createNewFileInEditor);
+    document.getElementById('editorUploadBtn').addEventListener('click', uploadFileInEditor);
 
     initSocket();
     loadBots();
