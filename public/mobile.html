@@ -73,6 +73,36 @@
     <div id="consoleOutput" class="p-4 bg-gray-900 min-h-screen text-gray-100 text-sm"></div>
   </div>
 
+  <!-- Files View -->
+  <div id="filesView" class="hidden">
+    <div id="noFilesMsg" class="text-center py-12 text-gray-500">
+      <svg class="w-16 h-16 mx-auto mb-4 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+      </svg>
+      <p>Select a bot to view files</p>
+    </div>
+    
+    <div id="filesContent" class="hidden">
+      <div class="bg-white border-b px-4 py-3 flex items-center justify-between sticky top-14 z-30">
+        <h2 id="filesBotName" class="font-semibold text-gray-900"></h2>
+        <div class="flex gap-2">
+          <button id="uploadFileBtn" class="p-2 bg-blue-600 text-white rounded-lg active:bg-blue-700">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+            </svg>
+          </button>
+          <button id="newFileBtn" class="p-2 bg-green-600 text-white rounded-lg active:bg-green-700">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div id="filesList" class="p-4 space-y-2"></div>
+    </div>
+    <input type="file" id="fileUploadInput" class="hidden">
+  </div>
+
   <!-- Settings View -->
   <div id="settingsView" class="hidden p-4">
     <div id="noSettings" class="text-center py-12 text-gray-500">
@@ -111,6 +141,12 @@
         </svg>
         <span class="text-xs font-medium">Bots</span>
       </button>
+      <button class="tab flex-1 py-3 flex flex-col items-center gap-1 text-gray-500 border-t-2 border-transparent" data-view="files">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+        </svg>
+        <span class="text-xs font-medium">Files</span>
+      </button>
       <button class="tab flex-1 py-3 flex flex-col items-center gap-1 text-gray-500 border-t-2 border-transparent" data-view="console">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
@@ -137,6 +173,18 @@
         <button id="modalConfirm" class="flex-1 py-2.5 bg-blue-600 text-white rounded-lg active:bg-blue-700">Confirm</button>
       </div>
     </div>
+  </div>
+
+  <!-- File Editor Modal -->
+  <div id="editorModal" class="fixed inset-0 bg-gray-900 z-50 hidden flex flex-col">
+    <div class="bg-white border-b px-4 py-3 flex items-center justify-between">
+      <h3 id="editorFileName" class="font-semibold text-gray-900"></h3>
+      <div class="flex gap-2">
+        <button id="saveFileBtn" class="px-3 py-1.5 bg-green-600 text-white rounded-lg text-sm active:bg-green-700">Save</button>
+        <button id="closeEditorBtn" class="px-3 py-1.5 bg-gray-200 text-gray-700 rounded-lg text-sm active:bg-gray-300">Close</button>
+      </div>
+    </div>
+    <textarea id="fileEditor" class="flex-1 p-4 font-mono text-sm bg-gray-900 text-gray-100 resize-none"></textarea>
   </div>
 
   <!-- Action Sheet -->
@@ -314,8 +362,177 @@
     async function selectBot(botName) {
       currentBot = botName;
       await loadSettings();
+      await loadFiles();
       switchView('settings');
     }
+
+    async function loadFiles() {
+      if (!currentBot) return;
+      
+      try {
+        const res = await fetch(`${API_URL}/api/bots/${currentBot}/files`);
+        const data = await res.json();
+        
+        document.getElementById('noFilesMsg').style.display = 'none';
+        document.getElementById('filesContent').style.display = 'block';
+        document.getElementById('filesBotName').textContent = currentBot;
+        
+        renderFilesList(data.files || []);
+      } catch (err) {
+        console.error('Failed to load files:', err);
+      }
+    }
+
+    function renderFilesList(files, container = document.getElementById('filesList'), level = 0) {
+      if (level === 0) container.innerHTML = '';
+      
+      files.forEach(file => {
+        const div = document.createElement('div');
+        div.className = 'bg-white rounded-lg p-3 shadow-sm';
+        div.style.marginLeft = `${level * 16}px`;
+        
+        if (file.type === 'folder') {
+          div.innerHTML = `
+            <div class="flex items-center gap-3">
+              <svg class="w-5 h-5 text-yellow-500" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
+              </svg>
+              <span class="flex-1 font-medium">${file.name}</span>
+            </div>
+          `;
+          container.appendChild(div);
+          if (file.children) {
+            renderFilesList(file.children, container, level + 1);
+          }
+        } else {
+          div.innerHTML = `
+            <div class="flex items-center gap-3">
+              <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+              </svg>
+              <span class="flex-1">${file.name}</span>
+              <button onclick="event.stopPropagation(); editFile('${file.path}')" class="p-2 text-blue-600 active:bg-blue-50 rounded">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                </svg>
+              </button>
+              <button onclick="event.stopPropagation(); deleteFile('${file.path}')" class="p-2 text-red-600 active:bg-red-50 rounded">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                </svg>
+              </button>
+            </div>
+          `;
+          container.appendChild(div);
+        }
+      });
+    }
+
+    let currentEditFile = null;
+
+    async function editFile(filePath) {
+      if (!currentBot) return;
+      
+      try {
+        const res = await fetch(`${API_URL}/api/bots/${currentBot}/file?filePath=${encodeURIComponent(filePath)}`);
+        const data = await res.json();
+        
+        currentEditFile = filePath;
+        document.getElementById('editorFileName').textContent = filePath;
+        document.getElementById('fileEditor').value = data.content;
+        document.getElementById('editorModal').style.display = 'flex';
+      } catch (err) {
+        showToast('Failed to load file', 'error');
+      }
+    }
+
+    async function saveFile() {
+      if (!currentBot || !currentEditFile) return;
+      
+      try {
+        const content = document.getElementById('fileEditor').value;
+        await fetch(`${API_URL}/api/bots/${currentBot}/file`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filePath: currentEditFile, content })
+        });
+        
+        showToast('File saved', 'success');
+        document.getElementById('editorModal').style.display = 'none';
+        currentEditFile = null;
+      } catch (err) {
+        showToast('Save failed', 'error');
+      }
+    }
+
+    async function deleteFile(filePath) {
+      if (!confirm(`Delete ${filePath}?`)) return;
+      
+      try {
+        await fetch(`${API_URL}/api/bots/${currentBot}/file`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filePath })
+        });
+        
+        showToast('File deleted', 'success');
+        loadFiles();
+      } catch (err) {
+        showToast('Delete failed', 'error');
+      }
+    }
+
+    async function createNewFile() {
+      if (!currentBot) {
+        showToast('Select a bot first', 'error');
+        return;
+      }
+      
+      const fileName = await showModal('New File', 'Enter file name:');
+      if (!fileName) return;
+      
+      try {
+        await fetch(`${API_URL}/api/bots/${currentBot}/file`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filePath: fileName, type: 'file' })
+        });
+        
+        showToast('File created', 'success');
+        loadFiles();
+      } catch (err) {
+        showToast('Create failed', 'error');
+      }
+    }
+
+    async function uploadFile() {
+      if (!currentBot) {
+        showToast('Select a bot first', 'error');
+        return;
+      }
+      document.getElementById('fileUploadInput').click();
+    }
+
+    document.getElementById('fileUploadInput').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file || !currentBot) return;
+      
+      try {
+        const content = await file.text();
+        await fetch(`${API_URL}/api/bots/${currentBot}/file`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filePath: file.name, content })
+        });
+        
+        showToast('File uploaded', 'success');
+        loadFiles();
+      } catch (err) {
+        showToast('Upload failed', 'error');
+      }
+      
+      e.target.value = '';
+    });
 
     async function loadSettings() {
       if (!currentBot) return;
@@ -432,6 +649,7 @@
       tab.classList.remove('text-gray-500', 'border-transparent');
       
       document.getElementById('botsView').classList.toggle('hidden', view !== 'bots');
+      document.getElementById('filesView').classList.toggle('hidden', view !== 'files');
       document.getElementById('consoleView').classList.toggle('hidden', view !== 'console');
       document.getElementById('settingsView').classList.toggle('hidden', view !== 'settings');
     }
@@ -505,6 +723,14 @@
     document.getElementById('clearConsoleBtn').addEventListener('click', () => {
       document.getElementById('consoleOutput').innerHTML = '';
       consoleLogs = [];
+    });
+    
+    document.getElementById('newFileBtn').addEventListener('click', createNewFile);
+    document.getElementById('uploadFileBtn').addEventListener('click', uploadFile);
+    document.getElementById('saveFileBtn').addEventListener('click', saveFile);
+    document.getElementById('closeEditorBtn').addEventListener('click', () => {
+      document.getElementById('editorModal').style.display = 'none';
+      currentEditFile = null;
     });
 
     document.getElementById('actionSheet').addEventListener('click', (e) => {
