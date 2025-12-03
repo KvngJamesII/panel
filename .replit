@@ -35,5 +35,12 @@ localPort = 5000
 externalPort = 80
 
 [[ports]]
-localPort = 38165
+localPort = 42595
 externalPort = 3000
+
+[userenv]
+
+[userenv.shared]
+GOOGLE_APPLICATION_CREDENTIALS = "/home/runner/workspace/gcloud-key.json"
+GCLOUD_PROJECT_ID = "elitehost-480108"
+GCLOUD_REGION = "us-central1"

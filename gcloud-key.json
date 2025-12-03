@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "elitehost-480108",
+  "private_key_id": "8f07ecb41c983c0854ac6a30e90ed174d863bb64",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDBUyuM/DEqyu7m\n3BJmvDvTtKz2uf7WZZJqwGezNlMH/lbNZAhfimrmTaUVrBBwnodBIDShnJq6DYC5\nJiRPFbF69NCVzHMlNkBWJIL2q2KLF+MLYxeAHc8RtVDivTkHfxTM052tUjX3LUjP\nlv/uZALNTfPTJyHTAIvtjDHX1kWhHowoRbY70SQnJX1zIPVFwEBDvtsPqoRTI9+O\n4zTjIZ1unsoWvEB6Np48nekI203R00PNVuOy/9BELhOBqWKyt8+AwgadC76qFxXB\nJNtrrj7t+lE/D/FyTZd5F647bHv8l1SlblUHPxUtAA1Lksp7DZK4E/fxDDokzKLw\ndVVq4sHzAgMBAAECggEABrZgDzuca2tzYxGmE+oaO64MyV5I4mHRdSJsF1VeCauD\nkQsVnVedgZSVlEyOn5JpiNHY8fmRh787RnJ0FUjgCjBg46qfHt4k2rjW0UC/Iaw5\nJmaQ5NJkI63DerPuPHvlmX0JfwCZPhVU71xDU6AmVsGLozu7GWvt79gLzP40GbV5\nxhtfFBH2I2MqSttZYtGR/duLhPUaTOIbwiTq0SpPLFz+w0RyQrm9qq1ho6Ozxe61\naqUqzv/63S9AEtdFtPKiWWhloaQGDC7xBpn09PZWi5K+9E0BOtPORLKFQpxoyGfJ\nTkGBClpSZBZUDByyRRheZxkOebMd0xxCtMmmrt0qcQKBgQD4ktqxZYrtMDGJzPow\ng8KryD5GuhlExQ8zW2D/6cVhhD/sOi7PY3o3ccN/H2/iNieP/t93XjgwEb9+Ehrr\nEKPPo/MVnmvm62liMJuy7W+xy+IAoN5Fh1CaddmLNalISOQ+whgTAox52LlQi/3t\naLC9+s86CWSnQdrdysRPgPkJwwKBgQDHGcLc2U6vanWI4aZDXFlnUhjdoSfN31/O\n/gzQjlsgjtSkkW7zSpl7RvA0IhUj/CTUHHpMFJCDxYQ2IrwGiwhvPEulcd2ytUko\nHNQie7xw56xdjO3xA3QeM1yEb2IuJ2aduvhI5amUQHN/jbciSMxgsk3Ypte44wwd\ny0FeDtS0EQKBgFYmv7kgEmhmfaTe8A+EeyICguMMeNmG2t/X2eSYZxqHNYhwGe0y\n8xboTPNwN9zVHB0iHt1GQH8Yh5/wMngqCjxa/FMP1yHvkVTAuBXpiP68RRYmqyK5\n5UvDcKR48rTk3oaJysI77egFHyU1f8qasDcICG569vGpN2wLbMKJVsb1AoGAOgpv\nfPQ4dPii9NlbH63vPih3qTxOnzxr8Kqsz6uAMziQEr12y6PGpGJkqb35zbi2f8Mh\nf8ZK7q8IwMNVbs7fEZZRMxTDnVIt1my5BqhtobhXzhnET4tDMX6ljNHvnCbOSlL0\nCEQzME2tndSRO4RfWB0ChpL0tigyIwlar/HA3hECgYBDtzLiFcRAItQ3v5yBPxRA\nF65Bu4yKMOdJtuD+3G+Boeyt0p/24QwTOD849D9RdmxSTdTrsFbjPTU9LhaOocYG\n3KXOjgJGKsIhanVuqCghjiMx/wPhvC7ydRrs9y0XWfW85Wpfh5YmPNLO2r8X8eWb\nfYGnJg1Il+Jdp1DLDhwa9A==\n-----END PRIVATE KEY-----\n",
+  "client_email": "elitehost@elitehost-480108.iam.gserviceaccount.com",
+  "client_id": "100784874933196060437",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/elitehost%40elitehost-480108.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}

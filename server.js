@@ -1,6 +1,6 @@
 const express = require('express');
 const multer = require('multer');
-const { exec, spawn } = require('child_process');
+const { exec, spawn, execSync } = require('child_process');
 const fs = require('fs').promises;
 const fsSync = require('fs');
 const path = require('path');
@@ -26,6 +26,37 @@ app.use(express.static('public'));
 const BOTS_DIR = path.resolve('./bots');
 const PROJECT_ID = process.env.GCLOUD_PROJECT_ID || 'elitehost-480108';
 const REGION = process.env.GCLOUD_REGION || 'us-central1';
+const GCLOUD_KEY_FILE = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+
+// Initialize Google Cloud authentication
+async function initGoogleCloud() {
+  if (!GCLOUD_KEY_FILE) {
+    console.log('⚠️ No GOOGLE_APPLICATION_CREDENTIALS set - GCloud commands may fail');
+    return false;
+  }
+  
+  try {
+    // Activate service account
+    console.log('🔐 Authenticating with Google Cloud...');
+    execSync(`gcloud auth activate-service-account --key-file="${GCLOUD_KEY_FILE}"`, {
+      stdio: 'pipe'
+    });
+    
+    // Set project
+    execSync(`gcloud config set project ${PROJECT_ID}`, {
+      stdio: 'pipe'
+    });
+    
+    console.log(`✅ Authenticated with Google Cloud (Project: ${PROJECT_ID})`);
+    return true;
+  } catch (err) {
+    console.error('❌ Google Cloud authentication failed:', err.message);
+    return false;
+  }
+}
+
+// Run authentication on startup
+initGoogleCloud();
 
 const deploymentStatus = {};
 
@@ -643,18 +674,9 @@ app.get('/api/bots', async (req, res) => {
 
       if (stats.isDirectory()) {
         const serviceName = `${sanitized}-bot`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-
-        let status = deploymentStatus[sanitized]?.status || 'unknown';
         
-        if (status === 'unknown') {
-          try {
-            const cmd = `gcloud run services describe ${serviceName} --region ${REGION} --format="value(status.conditions[0].status)"`;
-            const result = await execPromise(cmd);
-            status = result.includes('True') ? 'running' : 'stopped';
-          } catch {
-            status = 'not-deployed';
-          }
-        }
+        // Use cached status or default to not-deployed (fast)
+        let status = deploymentStatus[sanitized]?.status || 'not-deployed';
 
         bots.push({
           name: sanitized,
@@ -668,6 +690,33 @@ app.get('/api/bots', async (req, res) => {
     res.json({ bots });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Check status of a specific bot from cloud (on-demand)
+app.get('/api/bots/:botName/status', async (req, res) => {
+  const validation = validateBotAccess(req.params.botName);
+  if (!validation) {
+    return res.status(400).json({ error: 'Invalid bot name' });
+  }
+  
+  const { sanitizedBotName } = validation;
+  const serviceName = `${sanitizedBotName}-bot`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+  
+  try {
+    const cmd = `gcloud run services describe ${serviceName} --region ${REGION} --format="value(status.conditions[0].status)"`;
+    const result = await execPromise(cmd);
+    const status = result.includes('True') ? 'running' : 'stopped';
+    
+    deploymentStatus[sanitizedBotName] = { 
+      status, 
+      progress: status === 'running' ? 100 : 0,
+      timestamp: Date.now()
+    };
+    
+    res.json({ success: true, status, serviceName });
+  } catch {
+    res.json({ success: true, status: 'not-deployed', serviceName });
   }
 });
 
