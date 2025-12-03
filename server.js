@@ -21,6 +21,19 @@ const upload = multer({ dest: 'uploads/' });
 
 app.use(cors());
 app.use(express.json());
+
+// Mobile detection middleware
+app.get('/', (req, res) => {
+  const userAgent = req.headers['user-agent'] || '';
+  const isMobile = /iPhone|iPad|iPod|Android|webOS|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
+  
+  if (isMobile) {
+    res.sendFile(path.join(__dirname, 'public', 'mobile.html'));
+  } else {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  }
+});
+
 app.use(express.static('public'));
 
 const BOTS_DIR = path.resolve('./bots');
