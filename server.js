@@ -709,20 +709,33 @@ app.delete('/api/delete/:botName', async (req, res) => {
 
   try {
     emitLog(sanitizedBotName, '🗑️ Deleting bot...', 'info');
+    emitStatus(sanitizedBotName, 'stopping', 0);
     
-    const cmd = `gcloud run services delete ${serviceName} --region ${REGION} --quiet`;
-    await execPromise(cmd).catch(() => {});
+    // First, stop the service by scaling to 0
+    emitLog(sanitizedBotName, '⏸️ Stopping running service...', 'info');
+    const stopCmd = `gcloud run services update ${serviceName} --region ${REGION} --min-instances 0 --max-instances 0 --quiet`;
+    await execPromise(stopCmd).catch(() => {});
+    
+    // Wait a moment for instances to terminate
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    // Then delete the service completely
+    emitLog(sanitizedBotName, '🗑️ Removing service from Cloud Run...', 'info');
+    const deleteCmd = `gcloud run services delete ${serviceName} --region ${REGION} --quiet`;
+    await execPromise(deleteCmd).catch(() => {});
 
+    // Finally, remove local files
     await fs.rm(botDir, { recursive: true, force: true });
 
-    emitLog(sanitizedBotName, '✅ Bot deleted from Cloud Run and local storage', 'success');
+    emitLog(sanitizedBotName, '✅ Bot stopped and deleted from Cloud Run and local storage', 'success');
     delete deploymentStatus[sanitizedBotName];
 
     res.json({ 
       success: true, 
-      message: 'Bot deleted from Cloud Run and local storage'
+      message: 'Bot stopped and deleted from Cloud Run and local storage'
     });
   } catch (err) {
+    emitLog(sanitizedBotName, `❌ Delete failed: ${err.message}`, 'error');
     res.status(500).json({ error: err.message });
   }
 });
