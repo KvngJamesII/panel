@@ -461,7 +461,7 @@
       }
       renderBotsList();
       
-      if (progress !== null) {
+      if (progress !== null && progress < 100) {
         document.getElementById('progressContainer').classList.remove('hidden');
         document.getElementById('progressBar').style.width = `${progress}%`;
         document.getElementById('progressText').textContent = `${progress}%`;
@@ -469,10 +469,15 @@
       }
       
       if (status === 'running' || status === 'failed' || status === 'stopped') {
-        setTimeout(() => {
-          document.getElementById('progressContainer').classList.add('hidden');
-          document.getElementById('statusText').textContent = 'Ready';
-        }, 2000);
+        document.getElementById('progressContainer').classList.add('hidden');
+        document.getElementById('statusText').textContent = 'Ready';
+        
+        // Show notification
+        if (status === 'running') {
+          showNotification(`${botName} is now running!`, 'success');
+        } else if (status === 'failed') {
+          showNotification(`${botName} deployment failed`, 'error');
+        }
       }
       
       if (currentBot === botName) {

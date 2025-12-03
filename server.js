@@ -579,7 +579,25 @@ app.post('/api/deploy/:botName', async (req, res) => {
     try {
       await execWithLogs(deployCmd, sanitizedBotName);
       emitLog(sanitizedBotName, '✅ Bot deployed successfully to Cloud Run!', 'success');
-      emitStatus(sanitizedBotName, 'running', 100);
+      
+      // Wait a moment for Cloud Run to stabilize, then verify status
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      try {
+        const statusCmd = `gcloud run services describe ${serviceName} --region ${REGION} --format="value(status.conditions[0].status)"`;
+        const result = await execPromise(statusCmd);
+        const isRunning = result.trim().includes('True');
+        
+        if (isRunning) {
+          emitStatus(sanitizedBotName, 'running', 100);
+          emitLog(sanitizedBotName, '✅ Service is now running', 'success');
+        } else {
+          emitStatus(sanitizedBotName, 'stopped', 0);
+        }
+      } catch {
+        // If we can't verify, assume running since deploy succeeded
+        emitStatus(sanitizedBotName, 'running', 100);
+      }
     } catch (deployError) {
       emitLog(sanitizedBotName, `❌ Deployment failed: ${deployError.message}`, 'error');
       emitStatus(sanitizedBotName, 'failed', 0);

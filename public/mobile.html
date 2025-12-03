@@ -166,6 +166,13 @@
           bot.status = data.status;
           bot.progress = data.progress;
           renderBots();
+          
+          // Show toast notification when deployment completes
+          if (data.status === 'running' && data.progress === 100) {
+            showToast(`${data.botName} is now running!`, 'success');
+          } else if (data.status === 'failed') {
+            showToast(`${data.botName} deployment failed`, 'error');
+          }
         }
       });
     }
