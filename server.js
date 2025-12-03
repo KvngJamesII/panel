@@ -503,33 +503,47 @@ app.post('/api/deploy/:botName', async (req, res) => {
     emitLog(sanitizedBotName, '📦 Building container image...', 'info');
     emitStatus(sanitizedBotName, 'deploying', 20);
     
-    // Use async build to avoid log streaming issues with VPC-SC
-    const buildCmd = `gcloud builds submit --tag gcr.io/${PROJECT_ID}/${serviceName} --async ${botDir} 2>&1 || true`;
+    // Submit build and capture build ID
+    const buildCmd = `gcloud builds submit --tag gcr.io/${PROJECT_ID}/${serviceName} --async --format="value(id)" ${botDir}`;
     
-    let buildOutput = '';
+    let buildId = '';
     try {
-      buildOutput = await execWithLogs(buildCmd, sanitizedBotName);
-      emitLog(sanitizedBotName, '⏳ Build submitted, waiting for completion...', 'info');
+      buildId = (await execWithLogs(buildCmd, sanitizedBotName)).trim();
+      emitLog(sanitizedBotName, `⏳ Build submitted (ID: ${buildId}), waiting for completion...`, 'info');
       
-      // Wait for build to complete (poll for image)
+      // Poll for build status
       let attempts = 0;
-      const maxAttempts = 30; // 30 attempts = ~2.5 minutes
-      while (attempts < maxAttempts) {
+      const maxAttempts = 60; // 60 attempts = ~5 minutes
+      let buildStatus = 'QUEUED';
+      
+      while (attempts < maxAttempts && buildStatus !== 'SUCCESS') {
         await new Promise(resolve => setTimeout(resolve, 5000));
+        
         try {
-          const checkCmd = `gcloud container images describe gcr.io/${PROJECT_ID}/${serviceName}:latest --format="value(image_summary.digest)"`;
-          await execPromise(checkCmd);
-          emitLog(sanitizedBotName, '✅ Container built successfully', 'success');
-          emitStatus(sanitizedBotName, 'deploying', 60);
-          break;
-        } catch {
+          const statusCmd = `gcloud builds describe ${buildId} --format="value(status)"`;
+          buildStatus = (await execPromise(statusCmd)).trim();
+          
+          if (buildStatus === 'SUCCESS') {
+            emitLog(sanitizedBotName, '✅ Container built successfully', 'success');
+            emitStatus(sanitizedBotName, 'deploying', 60);
+            break;
+          } else if (buildStatus === 'FAILURE' || buildStatus === 'CANCELLED' || buildStatus === 'TIMEOUT') {
+            throw new Error(`Build ${buildStatus.toLowerCase()}`);
+          } else {
+            attempts++;
+            emitLog(sanitizedBotName, `⏳ Build ${buildStatus.toLowerCase()}... (${attempts}/${maxAttempts})`, 'info');
+          }
+        } catch (err) {
+          if (err.message.includes('Build')) {
+            throw err; // Re-throw build failures
+          }
           attempts++;
-          emitLog(sanitizedBotName, `⏳ Waiting for build... (${attempts}/${maxAttempts})`, 'info');
+          emitLog(sanitizedBotName, `⏳ Checking build status... (${attempts}/${maxAttempts})`, 'info');
         }
       }
       
-      if (attempts >= maxAttempts) {
-        throw new Error('Build timeout - image not found after 2.5 minutes');
+      if (attempts >= maxAttempts && buildStatus !== 'SUCCESS') {
+        throw new Error('Build timeout - exceeded 5 minutes');
       }
     } catch (buildError) {
       emitLog(sanitizedBotName, `❌ Build failed: ${buildError.message}`, 'error');
