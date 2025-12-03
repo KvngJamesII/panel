@@ -23,11 +23,49 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
-const BOTS_DIR = './bots';
+const BOTS_DIR = path.resolve('./bots');
 const PROJECT_ID = process.env.GCLOUD_PROJECT_ID || 'elitehost-480108';
 const REGION = process.env.GCLOUD_REGION || 'us-central1';
 
 const deploymentStatus = {};
+
+function sanitizeBotName(name) {
+  if (!name || typeof name !== 'string') return null;
+  const sanitized = name.trim().replace(/[^a-zA-Z0-9_-]/g, '-');
+  if (!sanitized || sanitized.includes('..') || sanitized.startsWith('-')) return null;
+  return sanitized;
+}
+
+function validateFilePath(botName, filePath) {
+  if (!filePath || typeof filePath !== 'string') return null;
+  if (filePath.includes('..') || path.isAbsolute(filePath)) return null;
+  
+  const sanitizedBotName = sanitizeBotName(botName);
+  if (!sanitizedBotName) return null;
+  
+  const botDir = path.join(BOTS_DIR, sanitizedBotName);
+  const fullPath = path.resolve(botDir, filePath);
+  
+  if (!fullPath.startsWith(botDir + path.sep) && fullPath !== botDir) {
+    return null;
+  }
+  
+  return { botDir, fullPath, sanitizedBotName };
+}
+
+function validateBotAccess(botName) {
+  const sanitized = sanitizeBotName(botName);
+  if (!sanitized) return null;
+  
+  const botDir = path.join(BOTS_DIR, sanitized);
+  const resolved = path.resolve(botDir);
+  
+  if (!resolved.startsWith(BOTS_DIR + path.sep) && resolved !== BOTS_DIR) {
+    return null;
+  }
+  
+  return { botDir: resolved, sanitizedBotName: sanitized };
+}
 
 (async () => {
   try {
@@ -68,16 +106,17 @@ app.get('/api/deployment-status', (req, res) => {
 app.post('/api/bots', async (req, res) => {
   try {
     const { name } = req.body;
-    if (!name || !name.trim()) {
-      return res.status(400).json({ error: 'Bot name is required' });
+    const sanitized = sanitizeBotName(name);
+    
+    if (!sanitized) {
+      return res.status(400).json({ error: 'Invalid bot name. Use only letters, numbers, underscores, and hyphens.' });
     }
 
-    const botName = name.trim().replace(/[^a-zA-Z0-9_-]/g, '-');
-    const botDir = path.join(BOTS_DIR, botName);
+    const botDir = path.join(BOTS_DIR, sanitized);
 
     await fs.mkdir(botDir, { recursive: true });
 
-    const indexJs = `// ${botName} Telegram Bot
+    const indexJs = `// ${sanitized} Telegram Bot
 const TelegramBot = require('node-telegram-bot-api');
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -85,7 +124,7 @@ const bot = new TelegramBot(token, { polling: true });
 
 bot.onText(/\\/start/, (msg) => {
   const chatId = msg.chat.id;
-  bot.sendMessage(chatId, 'Welcome to ${botName}! 🤖');
+  bot.sendMessage(chatId, 'Welcome to ${sanitized}! 🤖');
 });
 
 bot.on('message', (msg) => {
@@ -99,7 +138,7 @@ console.log('Bot is running...');
 `;
 
     const packageJson = {
-      name: botName,
+      name: sanitized,
       version: '1.0.0',
       main: 'index.js',
       scripts: {
@@ -121,7 +160,7 @@ CMD ["npm", "start"]`;
     await fs.writeFile(path.join(botDir, 'package.json'), JSON.stringify(packageJson, null, 2));
     await fs.writeFile(path.join(botDir, 'Dockerfile'), dockerfile);
 
-    res.json({ success: true, botName, message: 'Bot project created' });
+    res.json({ success: true, botName: sanitized, message: 'Bot project created' });
   } catch (err) {
     console.error('Create bot error:', err);
     res.status(500).json({ error: err.message });
@@ -130,19 +169,28 @@ CMD ["npm", "start"]`;
 
 app.get('/api/bots/:botName/files', async (req, res) => {
   try {
-    const { botName } = req.params;
-    const botDir = path.join(BOTS_DIR, botName);
+    const validation = validateBotAccess(req.params.botName);
+    if (!validation) {
+      return res.status(400).json({ error: 'Invalid bot name' });
+    }
+    
+    const { botDir } = validation;
     
     async function readDir(dir, relativePath = '') {
       const items = [];
-      const entries = await fs.readdir(dir, { withFileTypes: true });
+      let entries;
+      try {
+        entries = await fs.readdir(dir, { withFileTypes: true });
+      } catch {
+        return items;
+      }
       
       for (const entry of entries) {
         const fullPath = path.join(dir, entry.name);
         const itemPath = path.join(relativePath, entry.name);
         
         if (entry.isDirectory()) {
-          if (entry.name === 'node_modules') continue;
+          if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
           items.push({
             name: entry.name,
             path: itemPath,
@@ -176,16 +224,14 @@ app.get('/api/bots/:botName/files', async (req, res) => {
 
 app.get('/api/bots/:botName/file', async (req, res) => {
   try {
-    const { botName } = req.params;
     const { filePath } = req.query;
+    const validation = validateFilePath(req.params.botName, filePath);
     
-    if (!filePath) {
-      return res.status(400).json({ error: 'File path required' });
+    if (!validation) {
+      return res.status(400).json({ error: 'Invalid path' });
     }
     
-    const fullPath = path.join(BOTS_DIR, botName, filePath);
-    const content = await fs.readFile(fullPath, 'utf8');
-    
+    const content = await fs.readFile(validation.fullPath, 'utf8');
     res.json({ success: true, content, path: filePath });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -194,16 +240,14 @@ app.get('/api/bots/:botName/file', async (req, res) => {
 
 app.put('/api/bots/:botName/file', async (req, res) => {
   try {
-    const { botName } = req.params;
     const { filePath, content } = req.body;
+    const validation = validateFilePath(req.params.botName, filePath);
     
-    if (!filePath) {
-      return res.status(400).json({ error: 'File path required' });
+    if (!validation) {
+      return res.status(400).json({ error: 'Invalid path' });
     }
     
-    const fullPath = path.join(BOTS_DIR, botName, filePath);
-    await fs.writeFile(fullPath, content || '');
-    
+    await fs.writeFile(validation.fullPath, content || '');
     res.json({ success: true, message: 'File saved' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -212,21 +256,19 @@ app.put('/api/bots/:botName/file', async (req, res) => {
 
 app.post('/api/bots/:botName/file', async (req, res) => {
   try {
-    const { botName } = req.params;
     const { filePath, type } = req.body;
+    const validation = validateFilePath(req.params.botName, filePath);
     
-    if (!filePath) {
-      return res.status(400).json({ error: 'File path required' });
+    if (!validation) {
+      return res.status(400).json({ error: 'Invalid path' });
     }
     
-    const fullPath = path.join(BOTS_DIR, botName, filePath);
-    
     if (type === 'folder') {
-      await fs.mkdir(fullPath, { recursive: true });
+      await fs.mkdir(validation.fullPath, { recursive: true });
     } else {
-      const dir = path.dirname(fullPath);
+      const dir = path.dirname(validation.fullPath);
       await fs.mkdir(dir, { recursive: true });
-      await fs.writeFile(fullPath, '');
+      await fs.writeFile(validation.fullPath, '');
     }
     
     res.json({ success: true, message: `${type === 'folder' ? 'Folder' : 'File'} created` });
@@ -237,20 +279,19 @@ app.post('/api/bots/:botName/file', async (req, res) => {
 
 app.delete('/api/bots/:botName/file', async (req, res) => {
   try {
-    const { botName } = req.params;
     const { filePath } = req.body;
+    const validation = validateFilePath(req.params.botName, filePath);
     
-    if (!filePath) {
-      return res.status(400).json({ error: 'File path required' });
+    if (!validation) {
+      return res.status(400).json({ error: 'Invalid path' });
     }
     
-    const fullPath = path.join(BOTS_DIR, botName, filePath);
-    const stats = await fs.stat(fullPath);
+    const stats = await fs.stat(validation.fullPath);
     
     if (stats.isDirectory()) {
-      await fs.rm(fullPath, { recursive: true });
+      await fs.rm(validation.fullPath, { recursive: true });
     } else {
-      await fs.unlink(fullPath);
+      await fs.unlink(validation.fullPath);
     }
     
     res.json({ success: true, message: 'Deleted successfully' });
@@ -261,14 +302,16 @@ app.delete('/api/bots/:botName/file', async (req, res) => {
 
 app.post('/api/bots/:botName/rename', async (req, res) => {
   try {
-    const { botName } = req.params;
     const { oldPath, newPath } = req.body;
     
-    const oldFullPath = path.join(BOTS_DIR, botName, oldPath);
-    const newFullPath = path.join(BOTS_DIR, botName, newPath);
+    const oldValidation = validateFilePath(req.params.botName, oldPath);
+    const newValidation = validateFilePath(req.params.botName, newPath);
     
-    await fs.rename(oldFullPath, newFullPath);
+    if (!oldValidation || !newValidation) {
+      return res.status(400).json({ error: 'Invalid path' });
+    }
     
+    await fs.rename(oldValidation.fullPath, newValidation.fullPath);
     res.json({ success: true, message: 'Renamed successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -282,7 +325,14 @@ app.post('/api/upload', upload.single('botFile'), async (req, res) => {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    const botName = path.basename(file.originalname, path.extname(file.originalname));
+    const rawName = path.basename(file.originalname, path.extname(file.originalname));
+    const botName = sanitizeBotName(rawName);
+    
+    if (!botName) {
+      await fs.unlink(file.path);
+      return res.status(400).json({ error: 'Invalid file name' });
+    }
+    
     const botDir = path.join(BOTS_DIR, botName);
 
     await fs.mkdir(botDir, { recursive: true });
@@ -330,8 +380,12 @@ CMD ["npm", "start"]`;
 
 app.get('/api/bots/:botName/config', async (req, res) => {
   try {
-    const { botName } = req.params;
-    const botDir = path.join(BOTS_DIR, botName);
+    const validation = validateBotAccess(req.params.botName);
+    if (!validation) {
+      return res.status(400).json({ error: 'Invalid bot name' });
+    }
+    
+    const { botDir } = validation;
     
     let packageJson = {};
     let dockerfile = '';
@@ -360,9 +414,13 @@ app.get('/api/bots/:botName/config', async (req, res) => {
 
 app.put('/api/bots/:botName/config', async (req, res) => {
   try {
-    const { botName } = req.params;
+    const validation = validateBotAccess(req.params.botName);
+    if (!validation) {
+      return res.status(400).json({ error: 'Invalid bot name' });
+    }
+    
+    const { botDir } = validation;
     const { startCommand, dependencies, dockerfile } = req.body;
-    const botDir = path.join(BOTS_DIR, botName);
     
     const pkgPath = path.join(botDir, 'package.json');
     let packageJson = {};
@@ -372,18 +430,18 @@ app.put('/api/bots/:botName/config', async (req, res) => {
       packageJson = JSON.parse(content);
     } catch {}
     
-    if (startCommand) {
+    if (startCommand && typeof startCommand === 'string') {
       packageJson.scripts = packageJson.scripts || {};
       packageJson.scripts.start = startCommand;
     }
     
-    if (dependencies) {
+    if (dependencies && typeof dependencies === 'object') {
       packageJson.dependencies = dependencies;
     }
     
     await fs.writeFile(pkgPath, JSON.stringify(packageJson, null, 2));
     
-    if (dockerfile) {
+    if (dockerfile && typeof dockerfile === 'string') {
       await fs.writeFile(path.join(botDir, 'Dockerfile'), dockerfile);
     }
     
@@ -394,35 +452,39 @@ app.put('/api/bots/:botName/config', async (req, res) => {
 });
 
 app.post('/api/deploy/:botName', async (req, res) => {
-  const { botName } = req.params;
-  const botDir = path.join(BOTS_DIR, botName);
+  const validation = validateBotAccess(req.params.botName);
+  if (!validation) {
+    return res.status(400).json({ error: 'Invalid bot name' });
+  }
+  
+  const { botDir, sanitizedBotName } = validation;
 
   try {
     await fs.access(botDir);
     
-    const serviceName = `${botName}-bot`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+    const serviceName = `${sanitizedBotName}-bot`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
     
-    emitStatus(botName, 'deploying', 0);
-    emitLog(botName, '🚀 Starting deployment to Google Cloud Run...', 'info');
+    emitStatus(sanitizedBotName, 'deploying', 0);
+    emitLog(sanitizedBotName, '🚀 Starting deployment to Google Cloud Run...', 'info');
     
     res.json({ success: true, message: 'Deployment started', serviceName });
     
-    emitLog(botName, '📦 Building container image...', 'info');
-    emitStatus(botName, 'deploying', 20);
+    emitLog(sanitizedBotName, '📦 Building container image...', 'info');
+    emitStatus(sanitizedBotName, 'deploying', 20);
     
     const buildCmd = `gcloud builds submit --tag gcr.io/${PROJECT_ID}/${serviceName} ${botDir}`;
     
     try {
-      await execWithLogs(buildCmd, botName);
-      emitLog(botName, '✅ Container built successfully', 'success');
-      emitStatus(botName, 'deploying', 60);
+      await execWithLogs(buildCmd, sanitizedBotName);
+      emitLog(sanitizedBotName, '✅ Container built successfully', 'success');
+      emitStatus(sanitizedBotName, 'deploying', 60);
     } catch (buildError) {
-      emitLog(botName, `❌ Build failed: ${buildError.message}`, 'error');
-      emitStatus(botName, 'failed', 0);
+      emitLog(sanitizedBotName, `❌ Build failed: ${buildError.message}`, 'error');
+      emitStatus(sanitizedBotName, 'failed', 0);
       return;
     }
     
-    emitLog(botName, '🌐 Deploying to Cloud Run...', 'info');
+    emitLog(sanitizedBotName, '🌐 Deploying to Cloud Run...', 'info');
     
     const deployCmd = `gcloud run deploy ${serviceName} \
       --image gcr.io/${PROJECT_ID}/${serviceName} \
@@ -435,18 +497,18 @@ app.post('/api/deploy/:botName', async (req, res) => {
       --cpu 1`;
     
     try {
-      await execWithLogs(deployCmd, botName);
-      emitLog(botName, '✅ Bot deployed successfully to Cloud Run!', 'success');
-      emitStatus(botName, 'running', 100);
+      await execWithLogs(deployCmd, sanitizedBotName);
+      emitLog(sanitizedBotName, '✅ Bot deployed successfully to Cloud Run!', 'success');
+      emitStatus(sanitizedBotName, 'running', 100);
     } catch (deployError) {
-      emitLog(botName, `❌ Deployment failed: ${deployError.message}`, 'error');
-      emitStatus(botName, 'failed', 0);
+      emitLog(sanitizedBotName, `❌ Deployment failed: ${deployError.message}`, 'error');
+      emitStatus(sanitizedBotName, 'failed', 0);
     }
     
   } catch (err) {
     console.error('Deploy error:', err);
-    emitLog(botName, `❌ Error: ${err.message}`, 'error');
-    emitStatus(botName, 'failed', 0);
+    emitLog(sanitizedBotName, `❌ Error: ${err.message}`, 'error');
+    emitStatus(sanitizedBotName, 'failed', 0);
     if (!res.headersSent) {
       res.status(500).json({ error: err.message });
     }
@@ -454,73 +516,87 @@ app.post('/api/deploy/:botName', async (req, res) => {
 });
 
 app.post('/api/restart/:botName', async (req, res) => {
-  const { botName } = req.params;
-  const serviceName = `${botName}-bot`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+  const validation = validateBotAccess(req.params.botName);
+  if (!validation) {
+    return res.status(400).json({ error: 'Invalid bot name' });
+  }
+  
+  const { sanitizedBotName } = validation;
+  const serviceName = `${sanitizedBotName}-bot`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
 
   try {
-    emitStatus(botName, 'restarting', 0);
-    emitLog(botName, '🔄 Restarting bot...', 'info');
+    emitStatus(sanitizedBotName, 'restarting', 0);
+    emitLog(sanitizedBotName, '🔄 Restarting bot...', 'info');
     
     const cmd = `gcloud run services update ${serviceName} \
       --region ${REGION} \
       --min-instances 1`;
     
-    await execWithLogs(cmd, botName);
+    await execWithLogs(cmd, sanitizedBotName);
     
-    emitLog(botName, '✅ Bot restarted successfully', 'success');
-    emitStatus(botName, 'running', 100);
+    emitLog(sanitizedBotName, '✅ Bot restarted successfully', 'success');
+    emitStatus(sanitizedBotName, 'running', 100);
     
     res.json({ success: true, message: 'Bot restarted' });
   } catch (err) {
-    emitLog(botName, `❌ Restart failed: ${err.message}`, 'error');
-    emitStatus(botName, 'failed', 0);
+    emitLog(sanitizedBotName, `❌ Restart failed: ${err.message}`, 'error');
+    emitStatus(sanitizedBotName, 'failed', 0);
     res.status(500).json({ error: err.message });
   }
 });
 
 app.post('/api/stop/:botName', async (req, res) => {
-  const { botName } = req.params;
-  const serviceName = `${botName}-bot`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+  const validation = validateBotAccess(req.params.botName);
+  if (!validation) {
+    return res.status(400).json({ error: 'Invalid bot name' });
+  }
+  
+  const { sanitizedBotName } = validation;
+  const serviceName = `${sanitizedBotName}-bot`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
 
   try {
-    emitStatus(botName, 'stopping', 0);
-    emitLog(botName, '⏸️ Stopping bot...', 'info');
+    emitStatus(sanitizedBotName, 'stopping', 0);
+    emitLog(sanitizedBotName, '⏸️ Stopping bot...', 'info');
     
     const cmd = `gcloud run services update ${serviceName} \
       --region ${REGION} \
       --min-instances 0 \
       --max-instances 0`;
 
-    await execWithLogs(cmd, botName);
+    await execWithLogs(cmd, sanitizedBotName);
 
-    emitLog(botName, '✅ Bot stopped (scaled to 0)', 'success');
-    emitStatus(botName, 'stopped', 0);
+    emitLog(sanitizedBotName, '✅ Bot stopped (scaled to 0)', 'success');
+    emitStatus(sanitizedBotName, 'stopped', 0);
 
     res.json({ 
       success: true, 
       message: 'Bot stopped (scaled to 0)'
     });
   } catch (err) {
-    emitLog(botName, `❌ Stop failed: ${err.message}`, 'error');
+    emitLog(sanitizedBotName, `❌ Stop failed: ${err.message}`, 'error');
     res.status(500).json({ error: err.message });
   }
 });
 
 app.delete('/api/delete/:botName', async (req, res) => {
-  const { botName } = req.params;
-  const serviceName = `${botName}-bot`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-  const botDir = path.join(BOTS_DIR, botName);
+  const validation = validateBotAccess(req.params.botName);
+  if (!validation) {
+    return res.status(400).json({ error: 'Invalid bot name' });
+  }
+  
+  const { botDir, sanitizedBotName } = validation;
+  const serviceName = `${sanitizedBotName}-bot`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
 
   try {
-    emitLog(botName, '🗑️ Deleting bot...', 'info');
+    emitLog(sanitizedBotName, '🗑️ Deleting bot...', 'info');
     
     const cmd = `gcloud run services delete ${serviceName} --region ${REGION} --quiet`;
     await execPromise(cmd).catch(() => {});
 
     await fs.rm(botDir, { recursive: true, force: true });
 
-    emitLog(botName, '✅ Bot deleted from Cloud Run and local storage', 'success');
-    delete deploymentStatus[botName];
+    emitLog(sanitizedBotName, '✅ Bot deleted from Cloud Run and local storage', 'success');
+    delete deploymentStatus[sanitizedBotName];
 
     res.json({ 
       success: true, 
@@ -532,8 +608,13 @@ app.delete('/api/delete/:botName', async (req, res) => {
 });
 
 app.get('/api/logs/:botName', async (req, res) => {
-  const { botName } = req.params;
-  const serviceName = `${botName}-bot`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+  const validation = validateBotAccess(req.params.botName);
+  if (!validation) {
+    return res.status(400).json({ error: 'Invalid bot name' });
+  }
+  
+  const { sanitizedBotName } = validation;
+  const serviceName = `${sanitizedBotName}-bot`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
 
   try {
     const cmd = `gcloud run services logs read ${serviceName} --region ${REGION} --limit 100`;
@@ -554,13 +635,16 @@ app.get('/api/bots', async (req, res) => {
     const bots = [];
 
     for (const file of files) {
-      const botDir = path.join(BOTS_DIR, file);
+      const sanitized = sanitizeBotName(file);
+      if (!sanitized || sanitized !== file) continue;
+      
+      const botDir = path.join(BOTS_DIR, sanitized);
       const stats = await fs.stat(botDir);
 
       if (stats.isDirectory()) {
-        const serviceName = `${file}-bot`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+        const serviceName = `${sanitized}-bot`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
 
-        let status = deploymentStatus[file]?.status || 'unknown';
+        let status = deploymentStatus[sanitized]?.status || 'unknown';
         
         if (status === 'unknown') {
           try {
@@ -573,10 +657,10 @@ app.get('/api/bots', async (req, res) => {
         }
 
         bots.push({
-          name: file,
+          name: sanitized,
           status,
           serviceName,
-          progress: deploymentStatus[file]?.progress || 0
+          progress: deploymentStatus[sanitized]?.progress || 0
         });
       }
     }

@@ -12,22 +12,7 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "Run Node.js"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
 args = "Start Bot Manager"
-
-[[workflows.workflow]]
-name = "Run Node.js"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "node index.js"
-
-[workflows.workflow.metadata]
-outputType = "console"
 
 [[workflows.workflow]]
 name = "Start Bot Manager"
@@ -47,3 +32,7 @@ channel = "stable-25_05"
 [[ports]]
 localPort = 5000
 externalPort = 80
+
+[[ports]]
+localPort = 38165
+externalPort = 3000
